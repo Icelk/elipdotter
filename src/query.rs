@@ -270,6 +270,15 @@ mod tests {
         assert_eq!(part, Part::and("icelk", "kvarn"));
     }
     #[test]
+    fn parse_and_chain() {
+        let input = "icelk kvarn web server";
+        let part = s(input);
+        assert_eq!(
+            part,
+            Part::and(Part::and(Part::and("icelk", "kvarn"), "web"), "server")
+        );
+    }
+    #[test]
     fn parse_plain_not() {
         let part = s("not icelk");
         assert_eq!(part, Part::not("icelk"));
@@ -280,5 +289,25 @@ mod tests {
             parse("", ParseOptions::default()).unwrap_err(),
             parse::Error::InputEmpty
         );
+    }
+    #[test]
+    fn parse_without_ops() {
+        assert_eq!(s("icelk"), Part::string("icelk"),);
+    }
+    #[test]
+    fn parse_and_before_or() {
+        let i1 = "icelk and kvarn or agde";
+        let i2 = "agde or icelk and kvarn";
+        let p1 = s(i1);
+        let p2 = s(i2);
+
+        assert_eq!(p1, Part::or(Part::and("icelk", "kvarn"), "agde"));
+        assert_eq!(p2, Part::or(Part::and("icelk", "kvarn"), "agde"));
+        assert_eq!(p1, p2);
+
+        let implicit = "icelk kvarn or agde";
+        let p_impl = s(implicit);
+
+        assert_eq!(p_impl, p1);
     }
 }
