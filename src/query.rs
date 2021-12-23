@@ -84,7 +84,11 @@ pub mod parse {
                 .expect("handle utf codepoint error, also this might bee too long.");
             if rest.is_empty() {
                 let right = Part::String(parser.take_string());
-                parser.finish_op(parser.old_op.unwrap(), right);
+                if let Some(op) = parser.old_op {
+                    parser.finish_op(op, right);
+                } else {
+                    parser.left = Some(right);
+                }
                 return parser.left.ok_or(Error::InputEmpty);
             }
         }
