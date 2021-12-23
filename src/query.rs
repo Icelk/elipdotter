@@ -29,8 +29,9 @@ impl<T: Into<String>> From<T> for Part {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 #[must_use]
+/// Eq implementation doesn't care of which is left and right.
 pub struct BinaryPart {
     pub left: Part,
     pub right: Part,
@@ -44,6 +45,13 @@ impl BinaryPart {
         Box::new(self)
     }
 }
+impl PartialEq for BinaryPart {
+    fn eq(&self, other: &Self) -> bool {
+        (self.left == other.left && self.right == other.right)
+            || (self.left == other.right && self.right == other.left)
+    }
+}
+impl Eq for BinaryPart {}
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[must_use]
 pub struct Query {
