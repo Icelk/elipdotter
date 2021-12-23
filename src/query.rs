@@ -204,7 +204,11 @@ pub mod parse {
     }
     impl Default for Options {
         fn default() -> Self {
-            Self::new().insert(NotLiteral).insert(AndSpace::default())
+            Self::new()
+                .insert(NotLiteral)
+                .insert(AndLiteral)
+                .insert(OrLiteral)
+                .insert(AndSpace::default())
         }
     }
     pub trait Rule: Debug {
@@ -242,18 +246,55 @@ pub mod parse {
     }
 
     #[derive(Debug)]
-    pub struct NotLiteral;
-    impl Rule for NotLiteral {
+    #[must_use]
+    pub struct LiteralRule {
+        literal: &'static str,
+        op: Op,
+    }
+    impl LiteralRule {
+        /// Matches the `literal` with [`Op`].
+        pub fn new(literal: &'static str, op: Op) -> Self {
+            Self { literal, op }
+        }
+    }
+    impl Rule for LiteralRule {
         fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
             if rest
-                .get(0..4)
-                .map_or(false, |rest| rest.eq_ignore_ascii_case("not "))
+                .get(0..self.literal.len())
+                .map_or(false, |rest| rest.eq_ignore_ascii_case(self.literal))
+                && rest
+                    .chars()
+                    .nth(self.literal.len())
+                    .map_or(false, |c| c == ' ')
             {
-                parser.op = Some(Op::Not);
-                Some(3)
+                parser.op = Some(self.op);
+                Some(self.literal.len())
             } else {
                 None
             }
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct AndLiteral;
+    impl Rule for AndLiteral {
+        fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
+            LiteralRule::new("and", Op::And).next(parser, rest)
+        }
+    }
+    #[derive(Debug)]
+    pub struct OrLiteral;
+    impl Rule for OrLiteral {
+        fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
+            LiteralRule::new("or", Op::Or).next(parser, rest)
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct NotLiteral;
+    impl Rule for NotLiteral {
+        fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
+            LiteralRule::new("not", Op::Not).next(parser, rest)
         }
     }
 }
