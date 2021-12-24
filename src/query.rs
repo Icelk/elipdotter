@@ -232,8 +232,15 @@ pub mod parse {
             }
         }
         fn finish_op(&mut self, op: Op, mut right: Part) {
+            if let Op::And | Op::Or = op {
+                if self.left.is_none() {
+                    self.left = Some(right);
+                    return;
+                }
+            }
             match op {
                 Op::And => {
+                    // UNWRAP: See if statement in top of fn
                     let left = self.left.take().unwrap();
                     let part = if let Part::Or(mut pair) = left {
                         if self.left_group_explicit {
@@ -252,6 +259,7 @@ pub mod parse {
                     self.left = Some(part);
                 }
                 Op::Or => {
+                    // UNWRAP: See if statement in top of fn
                     let left = self.left.take().unwrap();
                     self.left = Some(Part::Or(BinaryPart::new(left, right).into_box()));
                 }
@@ -263,7 +271,7 @@ pub mod parse {
                 let right = Part::String(self.take_string());
                 self.finish_part(self.old_op, right);
             }
-            self.left.take().ok_or(Error::InputEmpty)
+            self.left.take().ok_or(Error::NotEnoughArguments)
         }
         fn new() -> Self {
             Self {
@@ -284,10 +292,17 @@ pub mod parse {
         Or,
         Not,
     }
+    impl Op {
+        pub fn binary(&self) -> bool {
+            matches!(self, Self::And | Self::Or)
+        }
+    }
 
     #[derive(Debug, PartialEq, Eq, Clone)]
     pub enum Error {
         InputEmpty,
+        /// Operation took more arguments than what was supplied.
+        NotEnoughArguments,
         UnexpectedParentheses,
     }
     #[derive(Debug)]
@@ -324,6 +339,9 @@ pub mod parse {
     }
     impl Rule for AndSpace {
         fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
+            // if parser.string.is_empty() {
+            // return None;
+            // }
             if !self.last_was_other_op {
                 self.last_was_other_op = parser.op.is_some();
                 if self.last_was_other_op {
@@ -355,12 +373,17 @@ pub mod parse {
     }
     impl LiteralRule {
         /// Matches the `literal` with [`Op`].
+        ///
+        /// Will exit if nothing was detected before and this is a binary operation.
         pub fn new(literal: &'static str, op: Op) -> Self {
             Self { literal, op }
         }
     }
     impl Rule for LiteralRule {
         fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
+            if self.op.binary() && parser.string.is_empty() && parser.left.is_none() {
+                return None;
+            }
             if rest
                 .get(0..self.literal.len())
                 .map_or(false, |rest| rest.eq_ignore_ascii_case(self.literal))
@@ -475,7 +498,7 @@ mod tests {
     #[test]
     fn parse_parentheses_or() {
         let p1 = s("(icelk or kvarn) and code");
-        let p2 = s("code (kvarn or icelk)");
+        let p2 = s("code (kvarn or icelk) ");
 
         let correct = Part::and(Part::or("icelk", "kvarn"), "code");
 
@@ -485,10 +508,42 @@ mod tests {
         assert!(!p2.eq_order(&correct));
         assert_eq!(p1, p2);
     }
-
-    //  ↑ and, with (or) and (or)
-    // `not`
-    // ` `
+    #[test]
+    fn parse_parentheses_and() {
+        let p = s(" (icelk or iselk)  (kvarn or agde)))");
+        assert_eq!(
+            p,
+            Part::and(Part::or("icelk", "iselk"), Part::or("kvarn", "agde"))
+        );
+    }
+    #[test]
+    fn parse_not() {
+        let p = s("not");
+        assert_eq!(p, Part::string("not"));
+        assert_eq!(
+            parse("not ", ParseOptions::default()).unwrap_err(),
+            parse::Error::NotEnoughArguments
+        );
+    }
+    #[test]
+    fn parse_space() {
+        assert_eq!(
+            parse(" ", ParseOptions::default()).unwrap_err(),
+            parse::Error::NotEnoughArguments
+        );
+    }
+    #[test]
+    fn parse_parentheses_space() {
+        assert_eq!(
+            parse(" (  ) ", ParseOptions::default()).unwrap_err(),
+            parse::Error::NotEnoughArguments
+        );
+    }
+    #[test]
+    fn parse_binary_one_arg() {
+        let p = s("or icelk");
+        assert_eq!(p, Part::and("or", "icelk"));
+    }
     // ↑ in parentheses
     // `not` order with or and and
 }
