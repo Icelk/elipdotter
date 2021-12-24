@@ -296,6 +296,7 @@ pub mod parse {
         Not,
     }
     impl Op {
+        #[must_use]
         pub fn binary(&self) -> bool {
             matches!(self, Self::And | Self::Or)
         }
@@ -342,9 +343,6 @@ pub mod parse {
     }
     impl Rule for AndSpace {
         fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
-            // if parser.string.is_empty() {
-            // return None;
-            // }
             if !self.last_was_other_op {
                 self.last_was_other_op = parser.op.is_some();
                 if self.last_was_other_op {
@@ -547,6 +545,14 @@ mod tests {
         let p = s("or icelk");
         assert_eq!(p, Part::and("or", "icelk"));
     }
-    // ↑ in parentheses
-    // `not` order with or and and
+    #[test]
+    fn parse_parentheses_binary_one_arg() {
+        let p = s("(or (icelk))");
+        assert_eq!(p, Part::and("or", "icelk"));
+    }
+    #[test]
+    fn parse_operation_order() {
+        let p = s("icelk and not kvarn or agde");
+        assert_eq!(p, Part::or(Part::and("icelk", Part::not("kvarn")), "agde"));
+    }
 }
