@@ -22,6 +22,29 @@ impl Part {
     pub fn not(not: impl Into<Self>) -> Self {
         Self::Not(Box::new(not.into()))
     }
+
+    /// Tests the equality of the parts AND order.
+    ///
+    /// See [`BinaryPart`] for more details.
+    ///
+    /// This makes no difference to the [`Eq`] implementation if `self` is [`Self::Not`] or
+    /// [`Self::String`].
+    #[must_use]
+    pub fn eq_order(&self, other: &Self) -> bool {
+        if !self.eq(other) {
+            return false;
+        }
+        match self {
+            Self::String(_) | Self::Not(_) => true,
+            Self::Or(p1) | Self::And(p1) => {
+                if let Self::Or(p2) | Self::And(p2) = other {
+                    p1.eq_order(p2)
+                } else {
+                    false
+                }
+            }
+        }
+    }
 }
 impl<T: Into<String>> From<T> for Part {
     fn from(s: T) -> Self {
@@ -43,6 +66,17 @@ impl BinaryPart {
     #[must_use]
     pub fn into_box(self) -> Box<Self> {
         Box::new(self)
+    }
+    /// Swaps [`Self::left`] and [`Self::right`].
+    ///
+    /// This does not affect [`Eq`].
+    pub fn swap(&mut self) {
+        std::mem::swap(&mut self.left, &mut self.right);
+    }
+    /// Tests the equality of the parts AND order of [`Self::left`] & [`Self::right`].
+    #[must_use]
+    pub fn eq_order(&self, other: &Self) -> bool {
+        self.left == other.left && self.right == other.right
     }
 }
 impl PartialEq for BinaryPart {
@@ -153,11 +187,21 @@ pub mod parse {
             }
             1
         }
-        fn finish_op(&mut self, op: Op, right: Part) {
+        fn finish_op(&mut self, op: Op, mut right: Part) {
             match op {
                 Op::And => {
                     let left = self.left.take().unwrap();
-                    self.left = Some(Part::And(BinaryPart::new(left, right).into_box()));
+                    let part = if let Part::Or(mut pair) = left {
+                        std::mem::swap(&mut right, &mut pair.left);
+                        pair.swap();
+                        let and = Part::And(pair);
+                        // We swapped the left part of the pair to `right`.
+                        let or = right;
+                        Part::or(or, and)
+                    } else {
+                        Part::And(BinaryPart::new(left, right).into_box())
+                    };
+                    self.left = Some(part);
                 }
                 Op::Or => {
                     let left = self.left.take().unwrap();
@@ -309,6 +353,18 @@ mod tests {
     }
 
     #[test]
+    fn binary_swap_eq() {
+        let part = s("icelk kvarn");
+        let mut swapped = part.clone();
+        if let Part::And(pair) = &mut swapped {
+            pair.swap();
+        } else {
+            panic!("Isn't Add.");
+        }
+        assert_eq!(part, swapped);
+    }
+
+    #[test]
     fn parse_and() {
         let input = "icelk kvarn";
         let part = s(input);
@@ -347,7 +403,9 @@ mod tests {
         let p2 = s(i2);
 
         assert_eq!(p1, Part::or(Part::and("icelk", "kvarn"), "agde"));
+        assert!(p1.eq_order(&Part::or(Part::and("icelk", "kvarn"), "agde")));
         assert_eq!(p2, Part::or(Part::and("icelk", "kvarn"), "agde"));
+        assert!(!p2.eq_order(&Part::or(Part::and("icelk", "kvarn"), "agde")));
         assert_eq!(p1, p2);
 
         let implicit = "icelk kvarn or agde";
