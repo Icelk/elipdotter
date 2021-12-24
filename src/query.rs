@@ -166,6 +166,9 @@ pub mod parse {
         /// Panics if `rest.is_empty()`.
         fn next(&mut self, opts: &mut Options, rest: &str) -> Result<usize, Error> {
             if let Some(sub) = &mut self.sub {
+                if rest.starts_with('(') {
+                    self.sub_layer += 1;
+                }
                 if rest.starts_with(')') {
                     self.sub_layer -= 1;
                     if self.sub_layer == 0 {
