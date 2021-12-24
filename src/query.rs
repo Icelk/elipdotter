@@ -96,7 +96,7 @@ impl BinaryPart {
     /// Tests the equality of the parts AND order of [`Self::left`] & [`Self::right`].
     #[must_use]
     pub fn eq_order(&self, other: &Self) -> bool {
-        self.left == other.left && self.right == other.right
+        self.left.eq_order(&other.left) && self.right.eq_order(&other.right)
     }
 }
 impl PartialEq for BinaryPart {
@@ -132,26 +132,22 @@ pub mod parse {
         }
 
         loop {
-            let advance = parser.next(opts, rest);
+            let advance = parser.next(opts, rest)?;
             rest = rest
                 .get(advance..)
                 .expect("handle utf codepoint error, also this might bee too long.");
             if rest.is_empty() {
-                let right = Part::String(parser.take_string());
-                if let Some(op) = parser.old_op {
-                    parser.finish_op(op, right);
-                } else {
-                    parser.left = Some(right);
-                }
-                return parser.left.ok_or(Error::InputEmpty);
+                return parser.finish();
             }
         }
     }
 
     #[derive(Debug)]
     pub struct Parser {
-        pub sub: Option<Box<Parser>>,
+        sub: Option<Box<Parser>>,
+        sub_layer: usize,
         pub left: Option<Part>,
+        left_group_explicit: bool,
         pub string: String,
         old_op: Option<Op>,
         pub op: Option<Op>,
@@ -168,7 +164,25 @@ pub mod parse {
         /// # Panics
         ///
         /// Panics if `rest.is_empty()`.
-        fn next(&mut self, opts: &mut Options, rest: &str) -> usize {
+        fn next(&mut self, opts: &mut Options, rest: &str) -> Result<usize, Error> {
+            if let Some(sub) = &mut self.sub {
+                if rest.starts_with(')') {
+                    self.sub_layer -= 1;
+                    if self.sub_layer == 0 {
+                        let parenthesis = sub.finish()?;
+                        self.finish_part(self.old_op, parenthesis);
+                        self.sub = None;
+                        self.left_group_explicit = true;
+                        return Ok(1);
+                    }
+                }
+                return sub.next(opts, rest);
+            } else if rest.starts_with('(') {
+                self.sub = Some(Box::new(Self::new()));
+                self.sub_layer += 1;
+                return Ok(1);
+            }
+
             let mut advance = None;
             for rule in &mut opts.rules {
                 if let Some(result) = rule.next(self, rest) {
@@ -180,18 +194,21 @@ pub mod parse {
                 }
             }
             if let Some(advance) = advance {
-                match (self.op, self.old_op) {
-                    (Some(_), None) => {
-                        self.left = Some(Part::String(self.take_string()));
+                if !self.string.is_empty() {
+                    match (self.op, self.old_op) {
+                        (Some(_), None) => {
+                            self.left = Some(Part::String(self.take_string()));
+                        }
+                        (_, Some(old_op)) => {
+                            // set left and string to old op.
+                            //
+                            // replace old with new
+                            let right = Part::String(self.take_string());
+                            self.finish_op(old_op, right);
+                        }
+                        _ => {}
                     }
-                    (_, Some(old_op)) if !self.string.is_empty() => {
-                        // set left and string to old op.
-                        //
-                        // replace old with new
-                        let right = Part::String(self.take_string());
-                        self.finish_op(old_op, right);
-                    }
-                    _ => {}
+                    self.left_group_explicit = false;
                 }
 
                 if let Some(op) = self.op {
@@ -199,25 +216,36 @@ pub mod parse {
                     self.op = None;
                 }
 
-                return advance;
+                return Ok(advance);
             }
             let c = rest.chars().next().unwrap();
             if c.is_alphanumeric() {
                 self.string.push(c);
             }
-            1
+            Ok(1)
+        }
+        fn finish_part(&mut self, op: Option<Op>, right: Part) {
+            if let Some(op) = op {
+                self.finish_op(op, right);
+            } else {
+                self.left = Some(right);
+            }
         }
         fn finish_op(&mut self, op: Op, mut right: Part) {
             match op {
                 Op::And => {
                     let left = self.left.take().unwrap();
                     let part = if let Part::Or(mut pair) = left {
-                        std::mem::swap(&mut right, &mut pair.left);
-                        pair.swap();
-                        let and = Part::And(pair);
-                        // We swapped the left part of the pair to `right`.
-                        let or = right;
-                        Part::or(or, and)
+                        if self.left_group_explicit {
+                            Part::And(BinaryPart::new(Part::Or(pair), right).into_box())
+                        } else {
+                            std::mem::swap(&mut right, &mut pair.left);
+                            pair.swap();
+                            let and = Part::And(pair);
+                            // We swapped the left part of the pair to `right`.
+                            let or = right;
+                            Part::or(or, and)
+                        }
                     } else {
                         Part::And(BinaryPart::new(left, right).into_box())
                     };
@@ -230,10 +258,19 @@ pub mod parse {
                 Op::Not => self.left = Some(Part::Not(Box::new(right))),
             }
         }
+        fn finish(&mut self) -> Result<Part, Error> {
+            if !self.string.is_empty() {
+                let right = Part::String(self.take_string());
+                self.finish_part(self.old_op, right);
+            }
+            self.left.take().ok_or(Error::InputEmpty)
+        }
         fn new() -> Self {
             Self {
                 sub: None,
+                sub_layer: 0,
                 left: None,
+                left_group_explicit: false,
                 string: String::with_capacity(8),
                 old_op: None,
                 op: None,
@@ -251,6 +288,7 @@ pub mod parse {
     #[derive(Debug, PartialEq, Eq, Clone)]
     pub enum Error {
         InputEmpty,
+        UnexpectedParentheses,
     }
     #[derive(Debug)]
     #[must_use]
@@ -422,10 +460,11 @@ mod tests {
         let p1 = s(i1);
         let p2 = s(i2);
 
-        assert_eq!(p1, Part::or(Part::and("icelk", "kvarn"), "agde"));
-        assert!(p1.eq_order(&Part::or(Part::and("icelk", "kvarn"), "agde")));
-        assert_eq!(p2, Part::or(Part::and("icelk", "kvarn"), "agde"));
-        assert!(!p2.eq_order(&Part::or(Part::and("icelk", "kvarn"), "agde")));
+        let correct = Part::or(Part::and("icelk", "kvarn"), "agde");
+        assert_eq!(p1, correct);
+        assert!(p1.eq_order(&correct));
+        assert_eq!(p2, correct);
+        assert!(!p2.eq_order(&correct));
         assert_eq!(p1, p2);
 
         let implicit = "icelk kvarn or agde";
@@ -433,4 +472,23 @@ mod tests {
 
         assert_eq!(p_impl, p1);
     }
+    #[test]
+    fn parse_parentheses_or() {
+        let p1 = s("(icelk or kvarn) and code");
+        let p2 = s("code (kvarn or icelk)");
+
+        let correct = Part::and(Part::or("icelk", "kvarn"), "code");
+
+        assert_eq!(p1, correct);
+        assert!(p1.eq_order(&correct));
+        assert_eq!(p2, correct);
+        assert!(!p2.eq_order(&correct));
+        assert_eq!(p1, p2);
+    }
+
+    //  ↑ and, with (or) and (or)
+    // `not`
+    // ` `
+    // ↑ in parentheses
+    // `not` order with or and and
 }
