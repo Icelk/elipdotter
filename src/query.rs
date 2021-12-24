@@ -1,6 +1,8 @@
+use std::fmt::{self, Debug, Display};
+
 pub use parse::{parse, Options as ParseOptions};
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone)]
 #[must_use]
 pub enum Part {
     And(Box<BinaryPart>),
@@ -49,6 +51,24 @@ impl Part {
 impl<T: Into<String>> From<T> for Part {
     fn from(s: T) -> Self {
         Self::String(s.into())
+    }
+}
+impl Debug for Part {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Display::fmt(self, f)
+    }
+}
+impl Display for Part {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn fmt_pair(f: &mut fmt::Formatter<'_>, pair: &BinaryPart, op: &str) -> fmt::Result {
+            write!(f, "({} {} {})", pair.left, op, pair.right)
+        }
+        match self {
+            Self::String(s) => f.write_str(s),
+            Self::And(pair) => fmt_pair(f, pair, "AND"),
+            Self::Or(pair) => fmt_pair(f, pair, "OR"),
+            Self::Not(not) => write!(f, "(NOT {})", not),
+        }
     }
 }
 
