@@ -681,7 +681,7 @@ mod tests {
                     Part::and("agde", Part::not("sync")),
                     Part::and("icelk", Part::not("kvarn"))
                 ),
-                Part::string("agde")
+                Part::s("agde")
             )
         );
     }
