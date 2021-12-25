@@ -632,5 +632,16 @@ mod tests {
             )
         );
     }
-    // test display implementation
+
+    fn p_disp_match(string: &str) {
+        let p = s(string);
+        assert_eq!(p, s(&p.to_string()));
+    }
+    #[test]
+    fn parse_display() {
+        p_disp_match("agde not sync or icelk and not kvarn or agde");
+        p_disp_match(" ( kvarn ) icelk ");
+        p_disp_match(" (icelk or iselk)  (kvarn or agde)))");
+        p_disp_match("(or (icelk))");
+    }
 }
