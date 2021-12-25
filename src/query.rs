@@ -189,6 +189,16 @@ pub mod parse {
         pub fn string_marker(&self) -> Option<Op> {
             self.string_marker
         }
+        /// If the parser is completely empty, with no content.
+        #[must_use]
+        pub fn is_empty(&self) -> bool {
+            self.old_op.is_none()
+                && self.op.is_none()
+                && self.string_marker.is_none()
+                && self.string.is_empty()
+                && self.sub.is_none()
+                && self.left.is_none()
+        }
         // start by appending to a Part::String
         // if any things (struct) are recogniced
         // add their corresponding part (method of struct, manip the tree)
@@ -303,7 +313,13 @@ pub mod parse {
                 let right = self.take_string();
                 self.finish_part(self.old_op, right);
             }
-            self.left.take().ok_or(Error::NotEnoughArguments)
+            self.left.take().ok_or_else(|| {
+                if self.is_empty() {
+                    Error::InputEmpty
+                } else {
+                    Error::NotEnoughArguments
+                }
+            })
         }
         fn new() -> Self {
             Self {
@@ -374,6 +390,9 @@ pub mod parse {
     impl Rule for AndSpace {
         fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
             if parser.string_marker().is_some() && parser.string.is_empty() {
+                return None;
+            }
+            if parser.is_empty() {
                 return None;
             }
             if !self.last_was_other_op {
@@ -469,7 +488,12 @@ mod tests {
 
     /// Parses `s` with [`ParseOptions::default`].
     fn s(s: &str) -> Part {
-        parse(s, ParseOptions::default()).unwrap()
+        match parse(s, ParseOptions::default()) {
+            Ok(p) => p,
+            Err(err) => {
+                panic!("Failed to parse '{}', {:?}", s, err);
+            }
+        }
     }
 
     #[test]
@@ -568,14 +592,14 @@ mod tests {
     fn parse_space() {
         assert_eq!(
             parse(" ", ParseOptions::default()).unwrap_err(),
-            parse::Error::NotEnoughArguments
+            parse::Error::InputEmpty
         );
     }
     #[test]
     fn parse_parentheses_space() {
         assert_eq!(
             parse(" (  ) ", ParseOptions::default()).unwrap_err(),
-            parse::Error::NotEnoughArguments
+            parse::Error::InputEmpty,
         );
     }
     #[test]
