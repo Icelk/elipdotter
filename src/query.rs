@@ -419,7 +419,6 @@ pub mod parse {
                     .nth(self.literal.len())
                     .map_or(false, |c| c == ' ')
             {
-                println!("New literal operation {:?} {:?}", self.op, parser);
                 if self.op.binary() {
                     parser.op = Some(self.op);
                 } else {
