@@ -5,5 +5,6 @@
     // missing_docs
 )]
 pub mod query;
+pub mod index;
 
 // `TODO`: Intersect & union sets of responses
