@@ -149,12 +149,35 @@ pub mod parse {
         pub left: Option<Part>,
         left_group_explicit: bool,
         pub string: String,
+        string_marker: Option<Op>,
         old_op: Option<Op>,
         pub op: Option<Op>,
     }
     impl Parser {
-        fn take_string(&mut self) -> String {
-            std::mem::replace(&mut self.string, String::with_capacity(8))
+        fn take_string(&mut self) -> Part {
+            let string = std::mem::replace(&mut self.string, String::with_capacity(8));
+            let part = Part::String(string);
+            if let Some(marker) = self.string_marker.take() {
+                match marker {
+                    Op::Not => Part::not(part),
+                    Op::And | Op::Or => {
+                        unreachable!("In `set_string_marker`, we check for binary.")
+                    }
+                }
+            } else {
+                part
+            }
+        }
+        /// # Errors
+        ///
+        /// Returns an error if `op` is [`Op::binary`].
+        pub fn set_string_marker(&mut self, op: Op) -> Result<(), ()> {
+            if op.binary() {
+                Err(())
+            } else {
+                self.string_marker = Some(op);
+                Ok(())
+            }
         }
         // start by appending to a Part::String
         // if any things (struct) are recogniced
@@ -200,14 +223,23 @@ pub mod parse {
                 if !self.string.is_empty() {
                     match (self.op, self.old_op) {
                         (Some(_), None) => {
-                            self.left = Some(Part::String(self.take_string()));
+                            self.left = Some(self.take_string());
                         }
-                        (_, Some(old_op)) => {
+                        (Some(op), Some(old_op)) => {
                             // set left and string to old op.
                             //
                             // replace old with new
-                            let right = Part::String(self.take_string());
-                            self.finish_op(old_op, right);
+
+                            // NOT marker. When we next time `take_string`, get an Not part.
+                            // let right = if op.binary() {
+                            // let part = self.take_string();
+                            // self.finish_op(op, part)
+                            // } else {
+                            // self.take_string()
+                            // };
+                            let right = self.take_string();
+                            self.left = Some(self.finish_op(old_op, right));
+                            // self.old_op = None;
                         }
                         _ => {}
                     }
@@ -215,8 +247,10 @@ pub mod parse {
                 }
 
                 if let Some(op) = self.op {
+                    // if self.old_op.is_none() {
                     self.old_op = Some(op);
                     self.op = None;
+                    // }
                 }
 
                 return Ok(advance);
@@ -229,23 +263,23 @@ pub mod parse {
         }
         fn finish_part(&mut self, op: Option<Op>, right: Part) {
             if let Some(op) = op {
-                self.finish_op(op, right);
+                self.left = Some(self.finish_op(op, right));
             } else {
                 self.left = Some(right);
             }
         }
-        fn finish_op(&mut self, op: Op, mut right: Part) {
+        fn finish_op(&mut self, op: Op, mut right: Part) -> Part {
             if let Op::And | Op::Or = op {
                 if self.left.is_none() {
-                    self.left = Some(right);
-                    return;
+                    return right;
                 }
             }
             match op {
                 Op::And => {
                     // UNWRAP: See if statement in top of fn
                     let left = self.left.take().unwrap();
-                    let part = if let Part::Or(mut pair) = left {
+
+                    if let Part::Or(mut pair) = left {
                         if self.left_group_explicit {
                             Part::And(BinaryPart::new(Part::Or(pair), right).into_box())
                         } else {
@@ -258,20 +292,19 @@ pub mod parse {
                         }
                     } else {
                         Part::And(BinaryPart::new(left, right).into_box())
-                    };
-                    self.left = Some(part);
+                    }
                 }
                 Op::Or => {
                     // UNWRAP: See if statement in top of fn
                     let left = self.left.take().unwrap();
-                    self.left = Some(Part::Or(BinaryPart::new(left, right).into_box()));
+                    Part::Or(BinaryPart::new(left, right).into_box())
                 }
-                Op::Not => self.left = Some(Part::Not(Box::new(right))),
+                Op::Not => Part::Not(Box::new(right)),
             }
         }
         fn finish(&mut self) -> Result<Part, Error> {
             if !self.string.is_empty() {
-                let right = Part::String(self.take_string());
+                let right = self.take_string();
                 self.finish_part(self.old_op, right);
             }
             self.left.take().ok_or(Error::NotEnoughArguments)
@@ -283,6 +316,7 @@ pub mod parse {
                 left: None,
                 left_group_explicit: false,
                 string: String::with_capacity(8),
+                string_marker: None,
                 old_op: None,
                 op: None,
             }
@@ -393,7 +427,13 @@ pub mod parse {
                     .nth(self.literal.len())
                     .map_or(false, |c| c == ' ')
             {
-                parser.op = Some(self.op);
+                println!("New literal operation {:?} {:?}", self.op, parser);
+                if self.op.binary() {
+                    parser.op = Some(self.op);
+                } else {
+                    // UNWRAP: See errors note and the if statement we're in.
+                    parser.set_string_marker(self.op).unwrap();
+                }
                 Some(self.literal.len())
             } else {
                 None
@@ -552,7 +592,12 @@ mod tests {
     }
     #[test]
     fn parse_operation_order() {
+        // After an and (both literal and implicit),
+        // we get a NOT.
+        // There, `icelk` should be added to left.
+        // Not is not old-op, and then Kvarn should be added (when implicit and ` `).
         let p = s("icelk and not kvarn or agde");
         assert_eq!(p, Part::or(Part::and("icelk", Part::not("kvarn")), "agde"));
     }
+    // test display implementation
 }
