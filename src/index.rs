@@ -167,6 +167,18 @@ impl Default for SimpleDocRef {
 pub struct Simple {
     words: BTreeMap<String, SimpleDocRef>,
 }
+impl Simple {
+    pub fn new() -> Self {
+        Self {
+            words: BTreeMap::new(),
+        }
+    }
+}
+impl Default for Simple {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl ProviderCore for Simple {
     fn insert_word<'a>(&mut self, word: impl Into<Cow<'a, str>>, document: Id) {
         let cow = word.into();
