@@ -379,11 +379,11 @@ pub mod parse {
     impl Default for Options {
         fn default() -> Self {
             Self::new()
-                .insert(NotLiteral)
-                .insert(AndLiteral)
-                .insert(OrLiteral)
-                .insert(DashNot)
-                .insert(BangNot)
+                .insert(NotLiteral::default())
+                .insert(AndLiteral::default())
+                .insert(OrLiteral::default())
+                .insert(DashNot::default())
+                .insert(BangNot::default())
                 .insert(AndSpace::default())
         }
     }
@@ -431,6 +431,29 @@ pub mod parse {
         }
     }
 
+    macro_rules! generate_rule {
+        ($name: ident, $struct: ident, $new: expr) => {
+            #[derive(Debug)]
+            #[must_use]
+            pub struct $name($struct);
+            impl $name {
+                pub fn new() -> Self {
+                    Self($new)
+                }
+            }
+            impl Default for $name {
+                fn default() -> Self {
+                    Self::new()
+                }
+            }
+            impl Rule for $name {
+                fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
+                    self.0.next(parser, rest)
+                }
+            }
+        };
+    }
+
     #[derive(Debug)]
     #[must_use]
     pub struct LiteralRule {
@@ -469,13 +492,7 @@ pub mod parse {
     #[macro_export]
     macro_rules! literal_rule {
         ($name: ident, $literal: expr, $op: expr) => {
-            #[derive(Debug)]
-            pub struct $name;
-            impl Rule for $name {
-                fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
-                    LiteralRule::new($literal, $op).next(parser, rest)
-                }
-            }
+            generate_rule!($name, LiteralRule, LiteralRule::new($literal, $op));
         };
     }
 
@@ -511,13 +528,7 @@ pub mod parse {
     #[macro_export]
     macro_rules! not_prefix {
         ($name: ident, $prefix: expr) => {
-            #[derive(Debug)]
-            pub struct $name;
-            impl Rule for $name {
-                fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
-                    NotPrefix::new($prefix).next(parser, rest)
-                }
-            }
+            generate_rule!($name, NotPrefix, NotPrefix::new($prefix));
         };
     }
     not_prefix!(DashNot, "-");
