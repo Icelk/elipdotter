@@ -375,6 +375,8 @@ pub mod parse {
                 .insert(NotLiteral)
                 .insert(AndLiteral)
                 .insert(OrLiteral)
+                .insert(DashNot)
+                .insert(BangNot)
                 .insert(AndSpace::default())
         }
     }
@@ -478,6 +480,46 @@ pub mod parse {
     literal_rule!(AndLiteral, "and", Op::And);
     literal_rule!(OrLiteral, "or", Op::Or);
     literal_rule!(NotLiteral, "not", Op::Not);
+
+    #[derive(Debug)]
+    #[must_use]
+    pub struct NotPrefix {
+        prefix: &'static str,
+    }
+    impl NotPrefix {
+        pub fn new(prefix: &'static str) -> Self {
+            Self { prefix }
+        }
+    }
+    impl Rule for NotPrefix {
+        fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
+            if rest.starts_with(' ')
+                && rest
+                    .get(1..)
+                    .map_or(false, |rest| rest.starts_with(self.prefix))
+            {
+                parser.op = Some(Op::Not);
+                Some(1 + self.prefix.len())
+            } else {
+                None
+            }
+        }
+    }
+
+    #[macro_export]
+    macro_rules! not_prefix {
+        ($name: ident, $prefix: expr) => {
+            #[derive(Debug)]
+            pub struct $name;
+            impl Rule for $name {
+                fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
+                    NotPrefix::new($prefix).next(parser, rest)
+                }
+            }
+        };
+    }
+    not_prefix!(DashNot, "-");
+    not_prefix!(BangNot, "!");
 }
 
 #[cfg(test)]
