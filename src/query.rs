@@ -504,24 +504,28 @@ pub mod parse {
     #[must_use]
     pub struct NotPrefix {
         prefix: &'static str,
+        last_was_space: bool,
     }
     impl NotPrefix {
         pub fn new(prefix: &'static str) -> Self {
-            Self { prefix }
+            Self {
+                prefix,
+                last_was_space: false,
+            }
         }
     }
     impl Rule for NotPrefix {
         fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
-            if rest.starts_with(' ')
-                && rest
-                    .get(1..)
-                    .map_or(false, |rest| rest.starts_with(self.prefix))
-            {
-                parser.op = Some(Op::Not);
-                Some(1 + self.prefix.len())
+            let rule = if self.last_was_space && rest.starts_with(self.prefix) {
+                parser.set_op(Op::Not);
+                Some(self.prefix.len())
             } else {
                 None
-            }
+            };
+
+            self.last_was_space = rest.starts_with(' ');
+
+            rule
         }
     }
 
