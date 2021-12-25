@@ -379,6 +379,10 @@ pub mod parse {
         }
     }
     pub trait Rule: Debug {
+        /// # Returns
+        ///
+        /// If the match is successful, make changes to the `parser` (e.g. [`Parser::op`])
+        /// and return [`Some`] with the number of steps to step forward (length of operator).
         #[must_use]
         fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize>;
     }
