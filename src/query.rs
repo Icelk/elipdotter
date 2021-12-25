@@ -462,28 +462,22 @@ pub mod parse {
         }
     }
 
-    #[derive(Debug)]
-    pub struct AndLiteral;
-    impl Rule for AndLiteral {
-        fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
-            LiteralRule::new("and", Op::And).next(parser, rest)
-        }
-    }
-    #[derive(Debug)]
-    pub struct OrLiteral;
-    impl Rule for OrLiteral {
-        fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
-            LiteralRule::new("or", Op::Or).next(parser, rest)
-        }
+    #[macro_export]
+    macro_rules! literal_rule {
+        ($name: ident, $literal: expr, $op: expr) => {
+            #[derive(Debug)]
+            pub struct $name;
+            impl Rule for $name {
+                fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
+                    LiteralRule::new($literal, $op).next(parser, rest)
+                }
+            }
+        };
     }
 
-    #[derive(Debug)]
-    pub struct NotLiteral;
-    impl Rule for NotLiteral {
-        fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
-            LiteralRule::new("not", Op::Not).next(parser, rest)
-        }
-    }
+    literal_rule!(AndLiteral, "and", Op::And);
+    literal_rule!(OrLiteral, "or", Op::Or);
+    literal_rule!(NotLiteral, "not", Op::Not);
 }
 
 #[cfg(test)]
