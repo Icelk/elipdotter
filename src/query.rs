@@ -243,9 +243,7 @@ pub mod parse {
                 if let Some(result) = rule.next(self, rest) {
                     assert!(result > 0, "Cannot stay on the same byte.");
 
-                    if advance.is_none() {
-                        advance = Some(result);
-                    }
+                    advance = Some(result);
                 }
             }
             if let Some(advance) = advance {
