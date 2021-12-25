@@ -185,6 +185,10 @@ pub mod parse {
                 Ok(())
             }
         }
+        #[must_use]
+        pub fn string_marker(&self) -> Option<Op> {
+            self.string_marker
+        }
         // start by appending to a Part::String
         // if any things (struct) are recogniced
         // add their corresponding part (method of struct, manip the tree)
@@ -369,6 +373,9 @@ pub mod parse {
     }
     impl Rule for AndSpace {
         fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
+            if parser.string_marker().is_some() && parser.string.is_empty() {
+                return None;
+            }
             if !self.last_was_other_op {
                 self.last_was_other_op = parser.op.is_some();
                 if self.last_was_other_op {
@@ -585,6 +592,21 @@ mod tests {
     fn parse_operation_order() {
         let p = s("icelk and not kvarn or agde");
         assert_eq!(p, Part::or(Part::and("icelk", Part::not("kvarn")), "agde"));
+
+        let p = s("icelk or not kvarn or agde");
+        assert_eq!(p, Part::or(Part::or("icelk", Part::not("kvarn")), "agde"));
+
+        let p = s("agde not sync or icelk and not kvarn or agde");
+        assert_eq!(
+            p,
+            Part::or(
+                Part::or(
+                    Part::and("agde", Part::not("sync")),
+                    Part::and("icelk", Part::not("kvarn"))
+                ),
+                Part::string("agde")
+            )
+        );
     }
     // test display implementation
 }
