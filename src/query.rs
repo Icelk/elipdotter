@@ -142,6 +142,12 @@ pub mod parse {
         }
     }
 
+    #[derive(Debug, PartialEq, Eq)]
+    pub enum StringMarkerError {
+        /// The operation must be unary.
+        OperationIsBinary,
+    }
+
     #[derive(Debug)]
     pub struct Parser {
         sub: Option<Box<Parser>>,
@@ -171,9 +177,9 @@ pub mod parse {
         /// # Errors
         ///
         /// Returns an error if `op` is [`Op::binary`].
-        pub fn set_string_marker(&mut self, op: Op) -> Result<(), ()> {
+        pub fn set_string_marker(&mut self, op: Op) -> Result<(), StringMarkerError> {
             if op.binary() {
-                Err(())
+                Err(StringMarkerError::OperationIsBinary)
             } else {
                 self.string_marker = Some(op);
                 Ok(())
@@ -225,21 +231,9 @@ pub mod parse {
                         (Some(_), None) => {
                             self.left = Some(self.take_string());
                         }
-                        (Some(op), Some(old_op)) => {
-                            // set left and string to old op.
-                            //
-                            // replace old with new
-
-                            // NOT marker. When we next time `take_string`, get an Not part.
-                            // let right = if op.binary() {
-                            // let part = self.take_string();
-                            // self.finish_op(op, part)
-                            // } else {
-                            // self.take_string()
-                            // };
+                        (_, Some(old_op)) => {
                             let right = self.take_string();
                             self.left = Some(self.finish_op(old_op, right));
-                            // self.old_op = None;
                         }
                         _ => {}
                     }
@@ -247,10 +241,8 @@ pub mod parse {
                 }
 
                 if let Some(op) = self.op {
-                    // if self.old_op.is_none() {
                     self.old_op = Some(op);
                     self.op = None;
-                    // }
                 }
 
                 return Ok(advance);
@@ -592,10 +584,6 @@ mod tests {
     }
     #[test]
     fn parse_operation_order() {
-        // After an and (both literal and implicit),
-        // we get a NOT.
-        // There, `icelk` should be added to left.
-        // Not is not old-op, and then Kvarn should be added (when implicit and ` `).
         let p = s("icelk and not kvarn or agde");
         assert_eq!(p, Part::or(Part::and("icelk", Part::not("kvarn")), "agde"));
     }
