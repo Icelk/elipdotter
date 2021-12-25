@@ -12,7 +12,7 @@ pub enum Part {
     String(String),
 }
 impl Part {
-    pub fn string(s: impl AsRef<str>) -> Self {
+    pub fn s(s: impl AsRef<str>) -> Self {
         Self::String(s.as_ref().into())
     }
     pub fn and(left: impl Into<Self>, right: impl Into<Self>) -> Self {
@@ -577,7 +577,7 @@ mod tests {
     }
     #[test]
     fn parse_without_ops() {
-        assert_eq!(s("icelk"), Part::string("icelk"),);
+        assert_eq!(s("icelk"), Part::s("icelk"),);
     }
     #[test]
     fn parse_and_before_or() {
@@ -622,7 +622,7 @@ mod tests {
     #[test]
     fn parse_not() {
         let p = s("not");
-        assert_eq!(p, Part::string("not"));
+        assert_eq!(p, Part::s("not"));
         assert_eq!(
             parse("not ", ParseOptions::default()).unwrap_err(),
             parse::Error::NotEnoughArguments
