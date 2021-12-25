@@ -685,6 +685,14 @@ mod tests {
             )
         );
     }
+    #[test]
+    fn parse_prefix_not() {
+        assert_eq!(s("icelk !kvarn"), s("icelk -kvarn"));
+        assert_eq!(
+            s("icelk !kvarn"),
+            Part::and(Part::s("icelk"), Part::not("kvarn"))
+        );
+    }
 
     fn p_disp_match(string: &str) {
         let p = s(string);
