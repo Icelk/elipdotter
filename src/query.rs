@@ -157,7 +157,7 @@ pub mod parse {
         pub string: String,
         string_marker: Option<Op>,
         old_op: Option<Op>,
-        pub op: Option<Op>,
+        op: Option<Op>,
     }
     impl Parser {
         fn take_string(&mut self) -> Part {
@@ -188,6 +188,15 @@ pub mod parse {
         #[must_use]
         pub fn string_marker(&self) -> Option<Op> {
             self.string_marker
+        }
+        #[allow(clippy::missing_panics_doc)]
+        pub fn set_op(&mut self, op: Op) {
+            if op.binary() {
+                self.op = Some(op);
+            } else {
+                // UNWRAP: See errors note and the if statement we're in.
+                self.set_string_marker(op).unwrap();
+            }
         }
         /// If the parser is completely empty, with no content.
         #[must_use]
@@ -451,12 +460,7 @@ pub mod parse {
                     .nth(self.literal.len())
                     .map_or(false, |c| c == ' ')
             {
-                if self.op.binary() {
-                    parser.op = Some(self.op);
-                } else {
-                    // UNWRAP: See errors note and the if statement we're in.
-                    parser.set_string_marker(self.op).unwrap();
-                }
+                parser.set_op(self.op);
                 Some(self.literal.len())
             } else {
                 None
