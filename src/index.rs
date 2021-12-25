@@ -200,3 +200,7 @@ impl ProviderCore for Simple {
 // Simple with read data. If cache doesn't contain the needed word, panic.
 // Write about this behaviour in the docs. Make clear you have to add all the ones
 // you plan on looking up to the cache.
+//
+// When query resolves to more than 100 documents, cap?
+// How to determine which to use?
+// Say the query gave too many documents and do nothing?
