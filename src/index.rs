@@ -11,6 +11,7 @@ use std::ascii::AsciiExt;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Debug;
+use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
 pub struct Id(u64);
@@ -293,6 +294,117 @@ impl<'b> ProviderCore for Simple {
         self.words
             .get(word)
             .map_or(false, |word| word.contains(document))
+    }
+}
+fn word_pattern(c: char) -> bool {
+    c.is_ascii_whitespace() || c.is_ascii_punctuation()
+}
+#[derive(Debug)]
+pub struct SimpleOccurrencesIter<'a> {
+    iter: std::collections::btree_set::Iter<'a, Id>,
+    word: &'a str,
+
+    document_contents: &'a HashMap<Id, Arc<String>>,
+
+    current_doc: Option<(std::str::Split<'a, fn(char) -> bool>, Id)>,
+    current_pos: usize,
+    current_doc_matched: bool,
+
+    missing: &'a mut Vec<Id>,
+}
+impl<'a> SimpleOccurrencesIter<'a> {
+    fn new(
+        doc_ref: &'a SimpleDocRef,
+        word: &'a str,
+        document_contents: &'a HashMap<Id, Arc<String>>,
+        missing: &'a mut Vec<Id>,
+    ) -> Self {
+        Self {
+            iter: doc_ref.docs.iter(),
+            word,
+            document_contents,
+            current_doc: None,
+            current_pos: 0,
+            current_doc_matched: false,
+            missing,
+        }
+    }
+
+    // fn new(doc_ref: &'a SimpleDocRef) -> Self {
+    // Self {
+    // original: doc_ref,
+    // iter: doc_ref.docs.iter(),
+    // }
+    // }
+    // pub fn clone_from_start(&self) -> Self {
+    // Self::new(self.original)
+    // }
+}
+impl<'a> Iterator for SimpleOccurrencesIter<'a> {
+    type Item = Occurence;
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some((doc_iter, doc_id)) = &mut self.current_doc {
+            for doc in doc_iter {
+                let start = self.current_pos;
+                self.current_pos += doc.len() + 1;
+                if doc.is_empty() {
+                    continue;
+                }
+                if doc == self.word {
+                    self.current_doc_matched = true;
+                    return Some(Occurence::new(start));
+                }
+            }
+
+            if !self.current_doc_matched {
+                self.missing.push(*doc_id);
+            }
+        }
+
+        let next_doc = self.iter.next()?;
+        let contents = if let Some(c) = self.document_contents.get(next_doc) {
+            c
+        } else {
+            failed_to_find_document_in_provided_documents()
+        };
+        self.current_doc = Some((contents.split(word_pattern), *next_doc));
+        self.current_pos = 0;
+        self.next()
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+fn failed_to_find_document_in_provided_documents() -> ! {
+    panic!("Tried to get a document from the provided documents in `SimpleProvider`, but failed.")
+}
+#[derive(Debug)]
+#[must_use]
+pub struct SimpleProvider<'a> {
+    index: &'a Simple,
+    document_contents: HashMap<Id, Arc<String>>,
+
+    missing: Vec<Id>,
+}
+impl<'a> SimpleProvider<'a> {
+    pub fn new(index: &'a Simple) -> Self {
+        Self {
+            index,
+            document_contents: HashMap::new(),
+            missing: Vec::new(),
+        }
+    }
+    pub fn add_document(&mut self, id: Id, content: Arc<String>) {
+        self.document_contents.insert(id, content);
+    }
+    pub fn occurrences_of_word(&'a mut self, word: &'a str) -> Option<SimpleOccurrencesIter<'a>> {
+        let doc_ref = self.index.words.get(word)?;
+        Some(SimpleOccurrencesIter::new(
+            doc_ref,
+            word,
+            &self.document_contents,
+            &mut self.missing,
+        ))
     }
 }
 // Simple with read data. If cache doesn't contain the needed word, panic.
