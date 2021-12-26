@@ -428,3 +428,49 @@ impl<'a> SimpleProvider<'a> {
 //
 // When digesting, spawn tasks. Make their own Simple, which can be merged. They'll only check each
 // word once, instead of x times, where x is the occurrences of the word in the text.
+#[cfg(test)]
+mod tests {
+    use super::{DocumentMap, Id, Occurence, Provider, Simple, SimpleProvider};
+
+    fn doc1() -> &'static str {
+        "\
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Mauris interdum, metus ut consectetur ullamcorper, velit mi placerat diam, vitae rutrum quam magna sit amet lacus. Curabitur ut rutrum ante. Pellentesque vel neque ante. Nullam vel velit ut ipsum luctus varius id porta nisi. Morbi hendrerit, nunc non consequat consequat, dolor mi consectetur eros, vitae varius diam leo in sem. Aliquam erat volutpat. Proin id mollis quam. Morbi venenatis tincidunt nunc eget ullamcorper. Cras hendrerit libero enim, et aliquet diam rutrum ut. Duis auctor ligula libero, cursus ullamcorper libero porttitor eget. Aliquam scelerisque ac elit at condimentum. Fusce sit amet purus posuere, suscipit libero id, tincidunt nulla. Aliquam molestie orci vitae tellus commodo, nec mattis purus efficitur. Quisque quam nisl, fermentum sit amet ante vitae, finibus aliquet nunc. Ut ut hendrerit lorem.
+
+Nam porttitor urna leo, sit amet imperdiet libero vulputate sed. Morbi elementum ligula turpis, at mattis risus finibus vitae. Vestibulum id egestas tortor. Curabitur suscipit nulla dolor. Duis rhoncus et felis dignissim bibendum. Sed congue arcu quis lacinia iaculis. Nam sit amet lacus sit amet lacus efficitur bibendum."
+    }
+    fn doc2() -> &'static str {
+        "\
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla lectus orci, aliquam ut justo varius, consequat semper enim. Vestibulum porttitor justo sed tincidunt fringilla. Donec sit amet sollicitudin mi, eu bibendum orci. Maecenas at feugiat ipsum. Vestibulum libero dolor, egestas et sollicitudin eu, ornare sit amet mauris. Maecenas in dolor volutpat, rhoncus urna id, luctus sem. Nulla pulvinar non ex eu venenatis.
+
+Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc mi sit amet libero. Aenean nec arcu pulvinar, venenatis erat ac, sodales massa. Morbi quam leo, cursus at est a, placerat aliquam mauris. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. In hac habitasse platea dictumst. In consectetur aliquet aliquam. In vel tempor elit, eget auctor dolor. Phasellus molestie est eget posuere imperdiet. Donec sagittis tincidunt facilisis. Sed eu pulvinar lectus, euismod dictum tellus. Nulla lacinia diam quis odio ultrices, viverra dictum arcu mollis. Donec tempor diam eget tristique maximus. Etiam a dui eu augue euismod dignissim."
+    }
+    #[test]
+    fn occurences() {
+        let mut doc_map = DocumentMap::new();
+        let mut index = Simple::new();
+        doc_map.insert("doc1", doc1(), &mut index);
+        println!();
+        println!("{:?}", index);
+        println!();
+        println!();
+        doc_map.insert("doc3", doc2(), &mut index);
+
+        println!("{:?}", index);
+
+        // TODO: Don't store the string, store a wrapper around String which ignores the same as
+        // query (non alphanumeric) in cmp & eq.
+        assert!(index.contains_word("lorem", doc_map.get_id("doc1").unwrap()));
+        assert!(index.contains_word("lorem", doc_map.get_id("doc3").unwrap()));
+        assert_eq!(doc_map.get_id("doc3"), Some(Id::new(1)));
+        assert_eq!(doc_map.get_id("doc2"), None);
+
+        let mut simple_provider = SimpleProvider::new(&index);
+        simple_provider.add_document(doc_map.get_id("doc1").unwrap(), doc1().to_string().into());
+        simple_provider.add_document(doc_map.get_id("doc3").unwrap(), doc2().to_string().into());
+
+        let mut occurrences = simple_provider.occurrences_of_word("lorem").unwrap();
+        // Same problem here as above
+        assert_eq!(occurrences.next(), Some(Occurence::new(0)));
+        assert_eq!(occurrences.next(), Some(Occurence::new(0)));
+    }
+}
