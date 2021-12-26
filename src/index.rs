@@ -101,7 +101,7 @@ impl DocumentMap {
         &mut self,
         name: impl Into<String>,
         content: &str,
-        provider: &mut impl ProviderCore,
+        provider: &mut impl Provider,
     ) {
         let name = name.into();
 
@@ -147,7 +147,7 @@ impl DocumentMap {
     //  If we have UUIDs instead, we can just remove the Id from `self`,
     //  as any attempts to resolve that into a path will fail.
     #[allow(clippy::missing_panics_doc)]
-    pub fn force_remove(&mut self, document: Id, provider: &mut impl ProviderCore) {
+    pub fn force_remove(&mut self, document: Id, provider: &mut impl Provider) {
         let previous = if let Some(prev) = self.id_to_name.remove(&document) {
             prev
         } else {
@@ -270,7 +270,7 @@ impl Default for Simple {
         Self::new()
     }
 }
-impl<'b> ProviderCore for Simple {
+impl<'b> Provider for Simple {
     /// O(log n log n)
     fn insert_word<'a>(&mut self, word: impl Into<Cow<'a, str>>, document: Id) {
         let cow = word.into();
