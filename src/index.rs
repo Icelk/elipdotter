@@ -25,15 +25,19 @@ impl Id {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
-pub struct Occurence(usize);
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
+pub struct Occurence(usize, Id);
 impl Occurence {
-    fn new(pos: usize) -> Self {
-        Self(pos)
+    fn new(pos: usize, document_id: Id) -> Self {
+        Self(pos, document_id)
     }
     #[must_use]
-    pub fn start(self) -> usize {
+    pub fn start(&self) -> usize {
         self.0
+    }
+    #[must_use]
+    pub fn id(&self) -> Id {
+        self.1
     }
 }
 
@@ -342,6 +346,7 @@ pub struct SimpleOccurrencesIter<'a> {
 
     document_contents: &'a HashMap<Id, Arc<String>>,
 
+    #[allow(clippy::type_complexity)] // That's not complex.
     current_doc: Option<(std::str::Split<'a, fn(char) -> bool>, Id)>,
     current_pos: usize,
     current_doc_matched: bool,
@@ -378,7 +383,7 @@ impl<'a> Iterator for SimpleOccurrencesIter<'a> {
                 }
                 if doc == self.word {
                     self.current_doc_matched = true;
-                    return Some(Occurence::new(start));
+                    return Some(Occurence::new(start, *doc_id));
                 }
             }
 
@@ -502,7 +507,18 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
 
         let mut occurrences = simple_provider.occurrences_of_word("lorem").unwrap();
         // Same problem here as above
-        assert_eq!(occurrences.next(), Some(Occurence::new(0)));
-        assert_eq!(occurrences.next(), Some(Occurence::new(0)));
+        assert_eq!(
+            occurrences.next(),
+            Some(Occurence::new(0, doc_map.get_id("doc1").unwrap()))
+        );
+        assert_eq!(
+            occurrences.next(),
+            Some(Occurence::new(875, doc_map.get_id("doc1").unwrap()))
+        );
+        assert_eq!(
+            occurrences.next(),
+            Some(Occurence::new(0, doc_map.get_id("doc3").unwrap()))
+        );
+        assert_eq!(occurrences.next(), None,);
     }
 }
