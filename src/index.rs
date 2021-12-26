@@ -1,3 +1,12 @@
+//! # Big O notation reference
+//!
+//! `O(1) < O(log n) < O(log n * log n) < O(sqrt(n)) < O(n) < O(n * log n) < O(n^1.1) < O(n²) < O(n³) < O(2^n)`
+//! `O(sqrt(n))` is true for all `sqrt(n^m)` where `0<m<1`.
+//!
+//! Since `O(log n)` is very close to `O(1)`,
+//! `O(log n * log n)` is also and
+//! `O(n * log n)` is very close to `O(n)`.
+
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Debug;
@@ -27,6 +36,9 @@ impl DocumentMap {
             id_to_name: BTreeMap::new(),
         }
     }
+    /// Alternatively, [`Self::reserve_id`] and then drop the lock, go to a different thread, and
+    /// make a new [`Simple`]. [`ProviderCore::digest_document`], then [`ProviderCore::ingest`] the
+    /// second index into the first.
     #[allow(clippy::missing_panics_doc)]
     pub fn insert(
         &mut self,
@@ -58,14 +70,17 @@ impl DocumentMap {
         }
         Id::new(last + 1)
     }
+    /// O(1)
     #[must_use]
     pub fn contains(&self, name: &str) -> bool {
         self.get_id(name).is_some()
     }
+    /// O(1)
     #[must_use]
     pub fn get_id(&self, name: &str) -> Option<Id> {
         self.name_to_id.get(name).copied()
     }
+    /// O(log n)
     #[must_use]
     pub fn get_name(&self, id: Id) -> Option<&str> {
         self.id_to_name.get(&id).map(|s| &**s)
@@ -116,13 +131,14 @@ pub trait DocumentIter<'a, T: Document + 'a>: Iterator<Item = T> {}
 /// Some [`ProviderCore`] implementers might need to be extended with more data to supply all the
 /// necessary information.
 pub trait Proider: ProviderCore {
-    fn documents_with_word<'a, T: Document + 'a, I: DocumentIter<'a, T>>(&'a self, word: &str)
+    fn occurrences_of_word<'a, T: Document + 'a, I: DocumentIter<'a, T>>(&'a self, word: &str)
         -> I;
 }
 /// Allows to insert words and remove occurrences from documents.
 pub trait ProviderCore {
     fn insert_word<'a>(&mut self, word: impl Into<Cow<'a, str>>, document: Id);
     fn remove_document(&mut self, document: Id);
+    fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool;
 
     /// Only adds words which are alphanumeric.
     fn digest_document(&mut self, id: Id, content: &str) {
@@ -155,6 +171,13 @@ impl SimpleDocRef {
     pub fn remove(&mut self, document: Id) {
         self.docs.remove(&document);
     }
+    #[must_use]
+    pub fn contains(&self, document: Id) -> bool {
+        self.docs.contains(&document)
+    }
+    pub fn documents(&self) -> impl Iterator<Item = Id> + ExactSizeIterator + '_ {
+        self.docs.iter().copied()
+    }
 }
 impl Default for SimpleDocRef {
     fn default() -> Self {
@@ -173,13 +196,39 @@ impl Simple {
             words: BTreeMap::new(),
         }
     }
+
+    /// O(log n)
+    ///
+    /// Iterator is O(1) - running this and consuming the iterator is O(n log n).
+    ///
+    /// You can get the length of the list using the [`ExactSizeIterator`] trait.
+    pub fn documents_with_word(
+        &self,
+        word: impl AsRef<str>,
+    ) -> Option<impl Iterator<Item = Id> + ExactSizeIterator + '_> {
+        self.words.get(word.as_ref()).map(SimpleDocRef::documents)
+    }
+
+    /// Merges `other` with `self`.
+    pub fn ingest(&mut self, other: Self) {
+        for (word, docs) in other.words {
+            if let Some(my_docs) = self.words.get_mut(&word) {
+                for doc in docs.documents() {
+                    my_docs.insert(doc);
+                }
+            } else {
+                self.words.insert(word, docs);
+            }
+        }
+    }
 }
 impl Default for Simple {
     fn default() -> Self {
         Self::new()
     }
 }
-impl ProviderCore for Simple {
+impl<'b> ProviderCore for Simple {
+    /// O(log n log n)
     fn insert_word<'a>(&mut self, word: impl Into<Cow<'a, str>>, document: Id) {
         let cow = word.into();
         if let Some(doc_ref) = self.words.get_mut(&*cow) {
@@ -196,6 +245,13 @@ impl ProviderCore for Simple {
             doc_ref.remove(document);
         }
     }
+    /// O(log n log n)
+    fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool {
+        let word = word.as_ref();
+        self.words
+            .get(word)
+            .map_or(false, |word| word.contains(document))
+    }
 }
 // Simple with read data. If cache doesn't contain the needed word, panic.
 // Write about this behaviour in the docs. Make clear you have to add all the ones
@@ -204,3 +260,6 @@ impl ProviderCore for Simple {
 // When query resolves to more than 100 documents, cap?
 // How to determine which to use?
 // Say the query gave too many documents and do nothing?
+//
+// When digesting, spawn tasks. Make their own Simple, which can be merged. They'll only check each
+// word once, instead of x times, where x is the occurrences of the word in the text.
