@@ -7,6 +7,7 @@
 //! `O(log n * log n)` is also and
 //! `O(n * log n)` is very close to `O(n)`.
 
+use std::ascii::AsciiExt;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Debug;
@@ -22,6 +23,61 @@ impl Id {
         self.0
     }
 }
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
+pub struct Occurence(usize);
+impl Occurence {
+    fn new(pos: usize) -> Self {
+        Self(pos)
+    }
+    #[must_use]
+    pub fn start(self) -> usize {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Hash)]
+pub struct Alphanumeral<T>(T);
+impl<T> Alphanumeral<T> {
+    pub fn new(s: T) -> Self {
+        Self(s)
+    }
+}
+impl<T: AsRef<str>> AsRef<str> for Alphanumeral<T> {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+impl<T1: AsRef<str>, T2: AsRef<str>> PartialEq<T1> for Alphanumeral<T2> {
+    fn eq(&self, other: &T1) -> bool {
+        let mut me = self.0.as_ref().chars();
+        let mut other = other.as_ref().chars();
+        loop {
+            let me_c = loop {
+                let n = me.next();
+                if n.map_or(false, |n| !n.is_alphanumeric()) {
+                    continue;
+                }
+                break n;
+            };
+            let other_c = loop {
+                let n = other.next();
+                if n.map_or(false, |n| !n.is_alphanumeric()) {
+                    continue;
+                }
+                break n;
+            };
+            if me_c != other_c {
+                return false;
+            }
+            if me_c.is_none() {
+                break;
+            }
+        }
+        true
+    }
+}
+impl<T: AsRef<str>> Eq for Alphanumeral<T> {}
 
 #[derive(Debug)]
 #[must_use]
