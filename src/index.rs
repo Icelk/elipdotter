@@ -7,10 +7,10 @@
 //! `O(log n * log n)` is also and
 //! `O(n * log n)` is very close to `O(n)`.
 
-use std::ascii::AsciiExt;
-use std::borrow::Cow;
+use std::borrow::Borrow;
+use std::cmp;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
@@ -37,11 +37,42 @@ impl Occurence {
     }
 }
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Clone, Hash)]
+#[repr(transparent)]
 pub struct Alphanumeral<T>(T);
 impl<T> Alphanumeral<T> {
     pub fn new(s: T) -> Self {
         Self(s)
+    }
+}
+impl<T: AsRef<str>> From<T> for Alphanumeral<T> {
+    fn from(v: T) -> Self {
+        Self::new(v)
+    }
+}
+// impl<T: AsRef<str>> Borrow<str> for Alphanumeral<T> {
+// fn borrow(&self) -> &str {
+// self.0.as_ref()
+// }
+// }
+impl<'a> Borrow<Alphanumeral<&'a str>> for Alphanumeral<String> {
+    fn borrow(&self) -> &Alphanumeral<&'a str> {
+        // let s = unsafe { &*(&self.0.as_str() as *const &str).cast::<Alphanumeral<&str>>() };
+        #[allow(clippy::ptr_as_ptr)]
+        let s = unsafe { &*(&self.0.as_str() as *const _ as *const Alphanumeral<&str>) };
+        println!("s {:?}", self.0.as_str());
+        println!("s {:?}", (&self.0.as_str()) as *const _);
+        println!("me {:?}", s as *const _);
+        s
+    }
+}
+impl<T: AsRef<str>> Alphanumeral<T> {
+    pub fn chars(&self) -> impl Iterator<Item = char> + '_ {
+        self.0
+            .as_ref()
+            .chars()
+            .filter(|c: &char| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
     }
 }
 impl<T: AsRef<str>> AsRef<str> for Alphanumeral<T> {
@@ -51,34 +82,30 @@ impl<T: AsRef<str>> AsRef<str> for Alphanumeral<T> {
 }
 impl<T1: AsRef<str>, T2: AsRef<str>> PartialEq<T1> for Alphanumeral<T2> {
     fn eq(&self, other: &T1) -> bool {
-        let mut me = self.0.as_ref().chars();
-        let mut other = other.as_ref().chars();
-        loop {
-            let me_c = loop {
-                let n = me.next();
-                if n.map_or(false, |n| !n.is_alphanumeric()) {
-                    continue;
-                }
-                break n;
-            };
-            let other_c = loop {
-                let n = other.next();
-                if n.map_or(false, |n| !n.is_alphanumeric()) {
-                    continue;
-                }
-                break n;
-            };
-            if me_c != other_c {
-                return false;
-            }
-            if me_c.is_none() {
-                break;
-            }
-        }
-        true
+        self.chars().eq(Alphanumeral::new(other).chars())
     }
 }
 impl<T: AsRef<str>> Eq for Alphanumeral<T> {}
+impl<T: AsRef<str>> PartialOrd for Alphanumeral<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl<T: AsRef<str>> Ord for Alphanumeral<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.chars().cmp(Alphanumeral::new(other).chars())
+    }
+}
+impl<T: AsRef<str>> Debug for Alphanumeral<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\"{}\"", self.chars().collect::<String>())
+    }
+}
+impl<T: AsRef<str>> Display for Alphanumeral<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.chars().collect::<String>())
+    }
+}
 
 #[derive(Debug)]
 #[must_use]
@@ -97,12 +124,7 @@ impl DocumentMap {
     /// make a new [`Simple`]. [`ProviderCore::digest_document`], then [`ProviderCore::ingest`] the
     /// second index into the first.
     #[allow(clippy::missing_panics_doc)]
-    pub fn insert(
-        &mut self,
-        name: impl Into<String>,
-        content: &str,
-        provider: &mut impl Provider,
-    ) {
+    pub fn insert(&mut self, name: impl Into<String>, content: &str, provider: &mut impl Provider) {
         let name = name.into();
 
         if let Some(id) = self.get_id(&name) {
@@ -182,7 +204,7 @@ impl WordOccurrence {
 }
 /// Allows to insert words and remove occurrences from documents.
 pub trait Provider {
-    fn insert_word<'a>(&mut self, word: impl Into<Cow<'a, str>>, document: Id);
+    fn insert_word(&mut self, word: impl AsRef<str>, document: Id);
     fn remove_document(&mut self, document: Id);
     fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool;
 
@@ -239,7 +261,7 @@ impl Default for SimpleDocRef {
 #[derive(Debug)]
 #[must_use]
 pub struct Simple {
-    words: BTreeMap<String, SimpleDocRef>,
+    words: BTreeMap<Alphanumeral<String>, SimpleDocRef>,
 }
 impl Simple {
     pub fn new() -> Self {
@@ -257,7 +279,9 @@ impl Simple {
         &self,
         word: impl AsRef<str>,
     ) -> Option<impl Iterator<Item = Id> + ExactSizeIterator + '_> {
-        self.words.get(word.as_ref()).map(SimpleDocRef::documents)
+        self.words
+            .get(&Alphanumeral::new(word.as_ref()))
+            .map(SimpleDocRef::documents)
     }
 
     /// Merges `other` with `self`.
@@ -280,17 +304,18 @@ impl Default for Simple {
 }
 impl<'b> Provider for Simple {
     /// O(log n log n)
-    fn insert_word<'a>(&mut self, word: impl Into<Cow<'a, str>>, document: Id) {
-        let cow = word.into();
-        if let Some(doc_ref) = self.words.get_mut(&*cow) {
+    fn insert_word(&mut self, word: impl AsRef<str>, document: Id) {
+        let word = word.as_ref();
+        if let Some(doc_ref) = self.words.get_mut(&Alphanumeral::new(word)) {
+            println!("Update '{}' {:?}", Alphanumeral::new(word), doc_ref);
             doc_ref.insert(document);
+            println!("Updated '{}' {:?}", word, doc_ref);
         } else {
             let mut doc_ref = SimpleDocRef::new();
             doc_ref.insert(document);
-            let mut word = cow.into_owned();
-            word.make_ascii_lowercase();
+            let word = Alphanumeral::new(word).chars().collect();
             println!("New word {} {:?}", word, doc_ref);
-            self.words.insert(word, doc_ref);
+            self.words.insert(Alphanumeral::new(word), doc_ref);
         }
     }
     /// O(n log n)
@@ -303,7 +328,7 @@ impl<'b> Provider for Simple {
     fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool {
         let word = word.as_ref();
         self.words
-            .get(word)
+            .get(&Alphanumeral::new(word))
             .map_or(false, |word| word.contains(document))
     }
 }
@@ -340,16 +365,6 @@ impl<'a> SimpleOccurrencesIter<'a> {
             missing,
         }
     }
-
-    // fn new(doc_ref: &'a SimpleDocRef) -> Self {
-    // Self {
-    // original: doc_ref,
-    // iter: doc_ref.docs.iter(),
-    // }
-    // }
-    // pub fn clone_from_start(&self) -> Self {
-    // Self::new(self.original)
-    // }
 }
 impl<'a> Iterator for SimpleOccurrencesIter<'a> {
     type Item = Occurence;
@@ -409,7 +424,7 @@ impl<'a> SimpleProvider<'a> {
         self.document_contents.insert(id, content);
     }
     pub fn occurrences_of_word(&'a mut self, word: &'a str) -> Option<SimpleOccurrencesIter<'a>> {
-        let doc_ref = self.index.words.get(word)?;
+        let doc_ref = self.index.words.get(&Alphanumeral::new(word))?;
         Some(SimpleOccurrencesIter::new(
             doc_ref,
             word,
@@ -430,7 +445,7 @@ impl<'a> SimpleProvider<'a> {
 // word once, instead of x times, where x is the occurrences of the word in the text.
 #[cfg(test)]
 mod tests {
-    use super::{DocumentMap, Id, Occurence, Provider, Simple, SimpleProvider};
+    use super::{Alphanumeral, DocumentMap, Id, Occurence, Provider, Simple, SimpleProvider};
 
     fn doc1() -> &'static str {
         "\
@@ -444,6 +459,18 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla lectus orci, aliq
 
 Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc mi sit amet libero. Aenean nec arcu pulvinar, venenatis erat ac, sodales massa. Morbi quam leo, cursus at est a, placerat aliquam mauris. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. In hac habitasse platea dictumst. In consectetur aliquet aliquam. In vel tempor elit, eget auctor dolor. Phasellus molestie est eget posuere imperdiet. Donec sagittis tincidunt facilisis. Sed eu pulvinar lectus, euismod dictum tellus. Nulla lacinia diam quis odio ultrices, viverra dictum arcu mollis. Donec tempor diam eget tristique maximus. Etiam a dui eu augue euismod dignissim."
     }
+
+    #[test]
+    fn alphanumerical() {
+        let s1 = Alphanumeral::new("test-is good!");
+        let s2 = Alphanumeral::new("TESTIsGood");
+        assert_eq!(s1, s2);
+        assert_eq!(s1.cmp(&s2), std::cmp::Ordering::Equal);
+        assert_eq!(s1.cmp(&"TestIsGood1".into()), std::cmp::Ordering::Less);
+        assert_eq!(s1.cmp(&"TestIsGooc".into()), std::cmp::Ordering::Greater);
+        assert_eq!(s1.cmp(&"TestIsGooe".into()), std::cmp::Ordering::Less);
+    }
+
     #[test]
     fn occurences() {
         let mut doc_map = DocumentMap::new();
@@ -451,6 +478,11 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
         doc_map.insert("doc1", doc1(), &mut index);
         println!();
         println!("{:?}", index);
+        println!("{:?}", index.words.get(&Alphanumeral::new("Lorem")));
+        println!("{:?}", index.words.get(&Alphanumeral::new("lorem")));
+        let s = Alphanumeral::new("Test".to_owned());
+        let borrow: &Alphanumeral<&str> = std::borrow::Borrow::borrow(&s);
+        println!("{:?}", borrow);
         println!();
         println!();
         doc_map.insert("doc3", doc2(), &mut index);
