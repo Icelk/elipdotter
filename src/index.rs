@@ -118,6 +118,9 @@ impl DocumentMap {
         provider.digest_document(id, content);
     }
     fn get_first(&self) -> Id {
+        if self.id_to_name.is_empty() {
+            return Id::new(0);
+        }
         let mut last = 0;
         for id in self.id_to_name.keys() {
             if id.inner() != last && id.inner() != last + 1 {
@@ -178,16 +181,21 @@ impl WordOccurrence {
     }
 }
 /// Allows to insert words and remove occurrences from documents.
-pub trait ProviderCore {
+pub trait Provider {
     fn insert_word<'a>(&mut self, word: impl Into<Cow<'a, str>>, document: Id);
     fn remove_document(&mut self, document: Id);
     fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool;
 
     /// Only adds words which are alphanumeric.
     fn digest_document(&mut self, id: Id, content: &str) {
-        for word in content.split_whitespace() {
+        for word in content.split(word_pattern) {
+            if word.is_empty() {
+                continue;
+            }
+            println!("Adding {}", word);
             // Word must be alphanumeric to be added.
             if word.contains(|c: char| !c.is_alphanumeric()) {
+                println!("Failed");
                 continue;
             }
 
@@ -279,7 +287,10 @@ impl<'b> Provider for Simple {
         } else {
             let mut doc_ref = SimpleDocRef::new();
             doc_ref.insert(document);
-            self.words.insert(cow.into_owned(), doc_ref);
+            let mut word = cow.into_owned();
+            word.make_ascii_lowercase();
+            println!("New word {} {:?}", word, doc_ref);
+            self.words.insert(word, doc_ref);
         }
     }
     /// O(n log n)
