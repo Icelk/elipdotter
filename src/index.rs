@@ -43,31 +43,44 @@ impl Occurence {
 
 #[derive(Clone, Hash)]
 #[repr(transparent)]
-pub struct Alphanumeral<T>(T);
+pub struct Alphanumeral<T: ?Sized>(T);
 impl<T> Alphanumeral<T> {
     pub fn new(s: T) -> Self {
         Self(s)
     }
 }
+impl Borrow<Alphanumeral<str>> for Alphanumeral<String> {
+    fn borrow(&self) -> &Alphanumeral<str> {
+        // println!("    Borrowing!");
+        #[allow(clippy::ptr_as_ptr)]
+        // SAFETY:
+        // `&str` is len and pointer to bytes.
+        // Alphanumeral<T> = T => &Alphanumeral<T> = &T (because `Alphanumeral` is
+        // #[repr(transparent)]).
+        // =>
+        // &Alphanumeral<(&str)> = &(&str)
+        //
+        // Therefore, they types are equivalent, so no UB.
+        //
+        // This was very hard to reason about...
+        // unsafe {
+        // &*((&self.0.as_str()) as *const _ as *const Alphanumeral<&str>)
+        // }
+        #[allow(clippy::transmute_ptr_to_ptr)]
+        #[allow(clippy::transmute_ptr_to_ref)]
+        unsafe {
+            // std::mem::transmute(&(self.0.as_str()) as *const &str)
+            let s = self as *const Alphanumeral<String> as *const String;
+            let s = &*s;
+            let s = s.as_str();
+            let a = s as *const str as *const Alphanumeral<str>;
+            &*a
+        }
+    }
+}
 impl<T: AsRef<str>> From<T> for Alphanumeral<T> {
     fn from(v: T) -> Self {
         Self::new(v)
-    }
-}
-// impl<T: AsRef<str>> Borrow<str> for Alphanumeral<T> {
-// fn borrow(&self) -> &str {
-// self.0.as_ref()
-// }
-// }
-impl<'a> Borrow<Alphanumeral<&'a str>> for Alphanumeral<String> {
-    fn borrow(&self) -> &Alphanumeral<&'a str> {
-        // let s = unsafe { &*(&self.0.as_str() as *const &str).cast::<Alphanumeral<&str>>() };
-        #[allow(clippy::ptr_as_ptr)]
-        let s = unsafe { &*(&self.0.as_str() as *const _ as *const Alphanumeral<&str>) };
-        println!("s {:?}", self.0.as_str());
-        println!("s {:?}", (&self.0.as_str()) as *const _);
-        println!("me {:?}", s as *const _);
-        s
     }
 }
 impl<T: AsRef<str>> Alphanumeral<T> {
@@ -97,7 +110,14 @@ impl<T: AsRef<str>> PartialOrd for Alphanumeral<T> {
 }
 impl<T: AsRef<str>> Ord for Alphanumeral<T> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.chars().cmp(Alphanumeral::new(other).chars())
+        println!("    CMPING {:?} {:?}", self, other);
+        let ord = self.chars().cmp(Alphanumeral::new(other).chars());
+
+        if let std::cmp::Ordering::Equal = ord {
+            println!("Match!");
+        }
+
+        ord
     }
 }
 impl<T: AsRef<str>> Debug for Alphanumeral<T> {
@@ -378,7 +398,8 @@ impl<'a> Iterator for SimpleOccurrencesIter<'a> {
             for doc in doc_iter {
                 let start = self.current_pos;
                 self.current_pos += doc.len() + 1;
-                if doc.is_empty() {
+                let doc = Alphanumeral::new(doc);
+                if doc.chars().next().is_none() {
                     continue;
                 }
                 if doc == self.word {
@@ -485,9 +506,6 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
         println!("{:?}", index);
         println!("{:?}", index.words.get(&Alphanumeral::new("Lorem")));
         println!("{:?}", index.words.get(&Alphanumeral::new("lorem")));
-        let s = Alphanumeral::new("Test".to_owned());
-        let borrow: &Alphanumeral<&str> = std::borrow::Borrow::borrow(&s);
-        println!("{:?}", borrow);
         println!();
         println!();
         doc_map.insert("doc3", doc2(), &mut index);
