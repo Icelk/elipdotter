@@ -120,20 +120,6 @@ impl WordOccurrence {
         self.pos
     }
 }
-pub trait Document {
-    fn iter_occurences<'a, I: DocumentPositionWordIter<'a>>(&self) -> I;
-}
-pub trait DocumentPositionWordIter<'a>: Iterator<Item = WordOccurrence> {}
-pub trait DocumentIter<'a, T: Document + 'a>: Iterator<Item = T> {}
-
-/// Allows to get data from the provider.
-///
-/// Some [`ProviderCore`] implementers might need to be extended with more data to supply all the
-/// necessary information.
-pub trait Proider: ProviderCore {
-    fn occurrences_of_word<'a, T: Document + 'a, I: DocumentIter<'a, T>>(&'a self, word: &str)
-        -> I;
-}
 /// Allows to insert words and remove occurrences from documents.
 pub trait ProviderCore {
     fn insert_word<'a>(&mut self, word: impl Into<Cow<'a, str>>, document: Id);
