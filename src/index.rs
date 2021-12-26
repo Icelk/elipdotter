@@ -7,7 +7,6 @@
 //! `O(log n * log n)` is also and
 //! `O(n * log n)` is very close to `O(n)`.
 
-use std::borrow::Cow;
 use std::cmp;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{Debug, Display};
@@ -112,7 +111,7 @@ impl DocumentMap {
     /// make a new [`Simple`]. [`ProviderCore::digest_document`], then [`ProviderCore::ingest`] the
     /// second index into the first.
     #[allow(clippy::missing_panics_doc)]
-    pub fn insert<'a>(&mut self, name: impl Into<String>, content: String, provider: &mut Simple<'a>) {
+    pub fn insert(&mut self, name: impl Into<String>, content: &str, provider: &mut impl Provider) {
         let name = name.into();
 
         if let Some(id) = self.get_id(&name) {
@@ -192,9 +191,9 @@ impl WordOccurrence {
 }
 /// Allows to insert words and remove occurrences from documents.
 pub trait Provider {
-    fn insert_word<'a>(&mut self, word: &'a str, document: Id);
+    fn insert_word(&mut self, word: impl AsRef<str>, document: Id);
     fn remove_document(&mut self, document: Id);
-    fn contains_word<'a>(&self, word: &'a str, document: Id) -> bool;
+    fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool;
 
     /// Only adds words which are alphanumeric.
     fn digest_document(&mut self, id: Id, content: &str) {
@@ -248,28 +247,27 @@ impl Default for SimpleDocRef {
 
 #[derive(Debug)]
 #[must_use]
-pub struct Simple<'a> {
-    words: BTreeMap<Alphanumeral<Cow<'a, str>>, SimpleDocRef>,
+pub struct Simple {
+    words: BTreeMap<Alphanumeral<String>, SimpleDocRef>,
 }
-impl Simple<'_> {
+impl Simple {
     pub fn new() -> Self {
         Self {
             words: BTreeMap::new(),
         }
     }
-}
-impl<'a> Simple<'a> {
+
     /// O(log n)
     ///
     /// Iterator is O(1) - running this and consuming the iterator is O(n log n).
     ///
     /// You can get the length of the list using the [`ExactSizeIterator`] trait.
     pub fn documents_with_word(
-        &'a self,
-        word: &'a str,
+        &self,
+        word: impl AsRef<str>,
     ) -> Option<impl Iterator<Item = Id> + ExactSizeIterator + '_> {
         self.words
-            .get(&Alphanumeral::new(Cow::Borrowed(word)))
+            .get(&Alphanumeral::new(word.as_ref().to_owned()))
             .map(SimpleDocRef::documents)
     }
 
@@ -286,16 +284,16 @@ impl<'a> Simple<'a> {
         }
     }
 }
-impl Default for Simple<'_> {
+impl Default for Simple {
     fn default() -> Self {
         Self::new()
     }
 }
-// impl<'b> Provider for Simple<'b> {
-impl<'b> Simple<'b> {
+impl<'b> Provider for Simple {
     /// O(log n log n)
-    fn insert_word(&mut self, word: &'b str, document: Id) {
-        if let Some(doc_ref) = self.words.get_mut(&Alphanumeral::new(Cow::Borrowed(word))) {
+    fn insert_word(&mut self, word: impl AsRef<str>, document: Id) {
+        let word = word.as_ref();
+        if let Some(doc_ref) = self.words.get_mut(&Alphanumeral::new(word.to_owned())) {
             println!("Update '{}' {:?}", Alphanumeral::new(word), doc_ref);
             doc_ref.insert(document);
             println!("Updated '{}' {:?}", word, doc_ref);
@@ -314,27 +312,11 @@ impl<'b> Simple<'b> {
         }
     }
     /// O(log n log n)
-    fn contains_word(&self, word: &'b str, document: Id) -> bool {
+    fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool {
         let word = word.as_ref();
         self.words
-            .get(&Alphanumeral::new(Cow::Borrowed(word)))
+            .get(&Alphanumeral::new(word.to_owned()))
             .map_or(false, |word| word.contains(document))
-    }
-
-    fn digest_document(&mut self, id: Id, content: String) {
-        for word in content.split(word_pattern) {
-            if word.is_empty() {
-                continue;
-            }
-            println!("Adding {}", word);
-            // Word must be alphanumeric to be added.
-            if word.contains(|c: char| !c.is_alphanumeric()) {
-                println!("Failed");
-                continue;
-            }
-
-            self.insert_word(word, id);
-        }
     }
 }
 fn word_pattern(c: char) -> bool {
@@ -414,7 +396,7 @@ fn failed_to_find_document_in_provided_documents() -> ! {
 #[derive(Debug)]
 #[must_use]
 pub struct SimpleProvider<'a> {
-    index: &'a Simple<'a>,
+    index: &'a Simple,
     document_contents: HashMap<Id, Arc<String>>,
 
     missing: Vec<Id>,
@@ -431,10 +413,7 @@ impl<'a> SimpleProvider<'a> {
         self.document_contents.insert(id, content);
     }
     pub fn occurrences_of_word(&'a mut self, word: &'a str) -> Option<SimpleOccurrencesIter<'a>> {
-        let doc_ref = self
-            .index
-            .words
-            .get(&Alphanumeral::new(Cow::Borrowed(word)))?;
+        let doc_ref = self.index.words.get(&Alphanumeral::new(word.to_owned()))?;
         Some(SimpleOccurrencesIter::new(
             doc_ref,
             word,
@@ -485,9 +464,7 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
     fn occurences() {
         let mut doc_map = DocumentMap::new();
         let mut index = Simple::new();
-        let d1 = doc1().to_string();
-        doc_map.insert("doc1", &d1, &mut index);
-        drop(d1);
+        doc_map.insert("doc1", doc1(), &mut index);
         doc_map.insert("doc3", doc2(), &mut index);
 
         assert!(index.contains_word("lorem", doc_map.get_id("doc1").unwrap()));
