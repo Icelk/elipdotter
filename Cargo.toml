@@ -12,3 +12,4 @@ keywords = []
 categories = []
 
 [dependencies]
+iter-set = "2.0.2"
