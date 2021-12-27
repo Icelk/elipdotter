@@ -94,6 +94,63 @@ impl<T: AsRef<str>> Display for Alphanumeral<T> {
     }
 }
 
+struct StrPtr {
+    s: *const str,
+    drop: bool,
+}
+impl StrPtr {
+    /// # Safety
+    ///
+    /// `s` must be valid for the lifetime of this object.
+    ///
+    /// If `drop` is true, we must also own `s`.
+    unsafe fn new(s: &str, drop: bool) -> Self {
+        Self { s, drop }
+    }
+    /// # Safety
+    ///
+    /// `s` must be valid for the lifetime of this object.
+    unsafe fn sref(s: &str) -> Self {
+        // Since `drop` is false, we don't care about ownership.
+        Self::new(s, false)
+    }
+    fn owned(s: impl Into<Box<str>>) -> Self {
+        let s = std::mem::ManuallyDrop::new(s.into());
+        // SAFETY: Since we have the ownership and used `ManuallyDrop`,
+        // the memory will never drop.
+        // We have to drop it, and it's valid until we do so.
+        unsafe { Self::new(&*s, true) }
+    }
+    fn as_mut(&self) -> *mut str {
+        self.s as *mut _
+    }
+}
+impl Drop for StrPtr {
+    fn drop(&mut self) {
+        if self.drop {
+            // SAFETY: Upheld by caller.
+            unsafe { (self.as_mut()).drop_in_place() }
+        }
+    }
+}
+impl AsRef<str> for StrPtr {
+    fn as_ref(&self) -> &str {
+        // SAFETY: Guaranteed by caller of [`Self::new`] that the string is valid for the lifetime
+        // of this struct.
+        unsafe { &*self.s }
+    }
+}
+impl Debug for StrPtr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.as_ref(), f)
+    }
+}
+impl Display for StrPtr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.as_ref(), f)
+    }
+}
+
 #[derive(Debug)]
 #[must_use]
 pub struct DocumentMap {
@@ -248,7 +305,7 @@ impl Default for SimpleDocRef {
 #[derive(Debug)]
 #[must_use]
 pub struct Simple {
-    words: BTreeMap<Alphanumeral<String>, SimpleDocRef>,
+    words: BTreeMap<Alphanumeral<StrPtr>, SimpleDocRef>,
 }
 impl Simple {
     pub fn new() -> Self {
@@ -266,8 +323,10 @@ impl Simple {
         &self,
         word: impl AsRef<str>,
     ) -> Option<impl Iterator<Item = Id> + ExactSizeIterator + '_> {
+        // SAFETY: We only use `StrPtr` in the current scope.
+        let ptr = unsafe { StrPtr::sref(word.as_ref()) };
         self.words
-            .get(&Alphanumeral::new(word.as_ref().to_owned()))
+            .get(&Alphanumeral::new(ptr))
             .map(SimpleDocRef::documents)
     }
 
@@ -293,16 +352,19 @@ impl<'b> Provider for Simple {
     /// O(log n log n)
     fn insert_word(&mut self, word: impl AsRef<str>, document: Id) {
         let word = word.as_ref();
-        if let Some(doc_ref) = self.words.get_mut(&Alphanumeral::new(word.to_owned())) {
+        // SAFETY: We only use `StrPtr` in the current scope.
+        let ptr = unsafe { StrPtr::sref(word) };
+        if let Some(doc_ref) = self.words.get_mut(&Alphanumeral::new(ptr)) {
             println!("Update '{}' {:?}", Alphanumeral::new(word), doc_ref);
             doc_ref.insert(document);
             println!("Updated '{}' {:?}", word, doc_ref);
         } else {
             let mut doc_ref = SimpleDocRef::new();
             doc_ref.insert(document);
-            let word = Alphanumeral::new(word).chars().collect();
+            let word = Alphanumeral::new(word).chars().collect::<String>();
             println!("New word {} {:?}", word, doc_ref);
-            self.words.insert(Alphanumeral::new(word), doc_ref);
+            let ptr = StrPtr::owned(word);
+            self.words.insert(Alphanumeral::new(ptr), doc_ref);
         }
     }
     /// O(n log n)
@@ -314,8 +376,10 @@ impl<'b> Provider for Simple {
     /// O(log n log n)
     fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool {
         let word = word.as_ref();
+        // SAFETY: We only use `StrPtr` in the current scope.
+        let ptr = unsafe { StrPtr::sref(word) };
         self.words
-            .get(&Alphanumeral::new(word.to_owned()))
+            .get(&Alphanumeral::new(ptr))
             .map_or(false, |word| word.contains(document))
     }
 }
@@ -413,7 +477,9 @@ impl<'a> SimpleProvider<'a> {
         self.document_contents.insert(id, content);
     }
     pub fn occurrences_of_word(&'a mut self, word: &'a str) -> Option<SimpleOccurrencesIter<'a>> {
-        let doc_ref = self.index.words.get(&Alphanumeral::new(word.to_owned()))?;
+        // SAFETY: We only use `StrPtr` in the current scope.
+        let ptr = unsafe { StrPtr::sref(word) };
+        let doc_ref = self.index.words.get(&Alphanumeral::new(ptr))?;
         Some(SimpleOccurrencesIter::new(
             doc_ref,
             word,
