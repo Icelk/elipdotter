@@ -387,8 +387,8 @@ fn word_pattern(c: char) -> bool {
     c.is_ascii_whitespace() || c.is_ascii_punctuation()
 }
 #[derive(Debug)]
-pub struct SimpleOccurrencesIter<'a> {
-    iter: std::collections::btree_set::Iter<'a, Id>,
+pub struct SimpleOccurrencesIter<'a, I> {
+    iter: I,
     word: &'a str,
 
     document_contents: &'a HashMap<Id, Arc<String>>,
@@ -400,15 +400,15 @@ pub struct SimpleOccurrencesIter<'a> {
 
     missing: &'a mut Vec<Id>,
 }
-impl<'a> SimpleOccurrencesIter<'a> {
+impl<'a, I: Iterator<Item = Id>> SimpleOccurrencesIter<'a, I> {
     fn new(
-        doc_ref: &'a SimpleDocRef,
+        iter: I,
         word: &'a str,
         document_contents: &'a HashMap<Id, Arc<String>>,
         missing: &'a mut Vec<Id>,
     ) -> Self {
         Self {
-            iter: doc_ref.docs.iter(),
+            iter,
             word,
             document_contents,
             current_doc: None,
@@ -418,7 +418,7 @@ impl<'a> SimpleOccurrencesIter<'a> {
         }
     }
 }
-impl<'a> Iterator for SimpleOccurrencesIter<'a> {
+impl<'a, I: Iterator<Item = Id>> Iterator for SimpleOccurrencesIter<'a, I> {
     type Item = Occurence;
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((doc_iter, doc_id)) = &mut self.current_doc {
@@ -441,12 +441,12 @@ impl<'a> Iterator for SimpleOccurrencesIter<'a> {
         }
 
         let next_doc = self.iter.next()?;
-        let contents = if let Some(c) = self.document_contents.get(next_doc) {
+        let contents = if let Some(c) = self.document_contents.get(&next_doc) {
             c
         } else {
             failed_to_find_document_in_provided_documents()
         };
-        self.current_doc = Some((contents.split(word_pattern), *next_doc));
+        self.current_doc = Some((contents.split(word_pattern), next_doc));
         self.current_pos = 0;
         self.next()
     }
@@ -476,12 +476,15 @@ impl<'a> SimpleProvider<'a> {
     pub fn add_document(&mut self, id: Id, content: Arc<String>) {
         self.document_contents.insert(id, content);
     }
-    pub fn occurrences_of_word(&'a mut self, word: &'a str) -> Option<SimpleOccurrencesIter<'a>> {
+    pub fn occurrences_of_word(
+        &'a mut self,
+        word: &'a str,
+    ) -> Option<SimpleOccurrencesIter<'a, impl Iterator<Item = Id> + 'a>> {
         // SAFETY: We only use `StrPtr` in the current scope.
         let ptr = unsafe { StrPtr::sref(word) };
         let doc_ref = self.index.words.get(&Alphanumeral::new(ptr))?;
         Some(SimpleOccurrencesIter::new(
-            doc_ref,
+            doc_ref.docs.iter().copied(),
             word,
             &self.document_contents,
             &mut self.missing,
