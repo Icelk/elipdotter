@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::iter::Peekable;
 use std::marker::PhantomData;
 
@@ -25,6 +24,9 @@ impl<T: PartialEq, I: Iter<T>> Iterator for Deduplicate<T, I> {
             } else {
                 let current = self.current.take();
                 self.current = self.iter.next();
+                if current.is_none() {
+                    continue;
+                }
                 return current;
             }
         }
