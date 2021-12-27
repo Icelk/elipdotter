@@ -2,9 +2,9 @@ use std::cmp::Ordering;
 use std::iter::Peekable;
 use std::marker::PhantomData;
 
-// Use <https://crates.io/crates/iter-set>?
-//
-// Make dedupe.
+/// Convenience trait for `Iterator<Item = T> -> Iter<T>`.
+pub trait Iter<T>: Iterator<Item = T> {}
+impl<T, I: Iterator<Item = T>> Iter<T> for I {}
 
 #[derive(Debug)]
 pub struct Deduplicate<T, I: Iter<T>> {
@@ -62,57 +62,6 @@ where
     R: IntoIterator<Item = T>,
 {
     iter_set::difference(deduplicate(a.into_iter()), deduplicate(b.into_iter()))
-}
-
-/// Convenience trait for `Iterator<Item = T> -> Iter<T>`.
-pub trait Iter<T>: Iterator<Item = T> {}
-impl<T, I: Iterator<Item = T>> Iter<T> for I {}
-
-#[derive(Debug)]
-pub struct Intersect<T, I1: Iter<T>, I2: Iter<T>> {
-    i1: Peekable<I1>,
-    i2: Peekable<I2>,
-    _t: PhantomData<T>,
-}
-
-impl<T, I1: Iter<T>, I2: Iter<T>> Intersect<T, I1, I2> {
-    pub fn new(i1: Peekable<I1>, i2: Peekable<I2>) -> Self {
-        Self {
-            i1,
-            i2,
-            _t: PhantomData,
-        }
-    }
-}
-impl<T: Ord, I1: Iter<T>, I2: Iter<T>> Iterator for Intersect<T, I1, I2> {
-    type Item = T;
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if let (Some(item1), Some(item2)) = (self.i1.peek(), self.i2.peek()) {
-                match item1.cmp(item2) {
-                    Ordering::Less => self.i1.next(),
-                    Ordering::Greater => self.i2.next(),
-                    Ordering::Equal => {
-                        // i1.next() == i2.next().
-                        // Doesn't matter which we return.
-                        self.i1.next();
-                        return self.i2.next();
-                    }
-                }
-            } else {
-                return None;
-            };
-        }
-    }
-}
-/// `i1` and `i2` must be sorted according to the [`Ord`] implementation of `T`.
-pub fn intersect<T: Ord>(
-    i1: impl Iterator<Item = T>,
-    i2: impl Iterator<Item = T>,
-) -> impl Iterator<Item = T> {
-    let i1 = i1.peekable();
-    let i2 = i2.peekable();
-    Intersect::new(i1, i2)
 }
 
 #[cfg(test)]
