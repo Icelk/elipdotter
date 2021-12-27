@@ -11,6 +11,17 @@ pub struct Deduplicate<T, I: Iter<T>> {
     current: Option<T>,
     _t: PhantomData<T>,
 }
+impl<T, I: Iter<T>> Deduplicate<T, I> {
+    fn new(iter: I) -> Self {
+        let mut iter = iter;
+        let next = iter.next();
+        Self {
+            iter: iter.peekable(),
+            current: next,
+            _t: PhantomData,
+        }
+    }
+}
 impl<T: PartialEq, I: Iter<T>> Iterator for Deduplicate<T, I> {
     type Item = T;
     fn next(&mut self) -> Option<Self::Item> {
@@ -24,20 +35,13 @@ impl<T: PartialEq, I: Iter<T>> Iterator for Deduplicate<T, I> {
             } else {
                 let current = self.current.take();
                 self.current = self.iter.next();
-                if current.is_none() {
-                    continue;
-                }
                 return current;
             }
         }
     }
 }
 pub fn deduplicate<T, I: Iter<T>>(iter: I) -> Deduplicate<T, I> {
-    Deduplicate {
-        iter: iter.peekable(),
-        current: None,
-        _t: PhantomData,
-    }
+    Deduplicate::new(iter)
 }
 
 pub fn intersect<T, L, R>(a: L, b: R) -> impl Iterator<Item = T>
