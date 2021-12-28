@@ -116,4 +116,11 @@ mod tests {
 
         assert!(iter.eq(["Hello", "See you!", "and", "bye", "hi", "there!"]));
     }
+    #[test]
+    fn difference_1() {
+        let (btree1, btree2) = btrees();
+        let iter = difference(btree1.iter(), btree2.iter()).copied();
+
+        assert!(iter.eq(["and", "hi"]));
+    }
 }
