@@ -46,6 +46,10 @@ pub fn deduplicate<T: PartialEq, I: Iter<T>>(iter: I) -> Deduplicate<T, I> {
     Deduplicate::new(iter)
 }
 
+/// Returns an iterator of the items in common between `a` and `b`.
+///
+/// Both iterators must be sorted.
+/// The returned iterator is also sorted.
 pub fn intersect<T, L, R>(a: L, b: R) -> impl Iterator<Item = T>
 where
     T: Ord,
@@ -54,6 +58,10 @@ where
 {
     iter_set::intersection(deduplicate(a.into_iter()), deduplicate(b.into_iter()))
 }
+/// Returns an iterator of all the items that occur in either `a` or `b`.
+///
+/// Both iterators must be sorted.
+/// The returned iterator is also sorted.
 pub fn union<T, L, R>(a: L, b: R) -> impl Iterator<Item = T>
 where
     T: Ord,
@@ -62,7 +70,10 @@ where
 {
     iter_set::union(deduplicate(a.into_iter()), deduplicate(b.into_iter()))
 }
-/// In a AND NOT b
+/// Returns an iterator of the items in `a` AND NOT in `b`.
+///
+/// Both iterators must be sorted.
+/// The returned iterator is also sorted.
 pub fn difference<T, L, R>(a: L, b: R) -> impl Iterator<Item = T>
 where
     T: Ord,
@@ -76,10 +87,9 @@ where
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::intersect;
+    use super::{difference, intersect, union};
 
-    #[test]
-    fn intersect_1() {
+    fn btrees() -> (BTreeSet<&'static str>, BTreeSet<&'static str>) {
         let mut btree1 = BTreeSet::new();
         btree1.insert("hi");
         btree1.insert("and");
@@ -89,8 +99,21 @@ mod tests {
         btree2.insert("there!");
         btree2.insert("See you!");
         btree2.insert("bye");
+        (btree1, btree2)
+    }
+
+    #[test]
+    fn intersect_1() {
+        let (btree1, btree2) = btrees();
         let mut iter = intersect(btree1.iter(), btree2.iter()).copied();
         assert_eq!(iter.next(), Some("bye"));
         assert_eq!(iter.next(), None);
+    }
+    #[test]
+    fn union_1() {
+        let (btree1, btree2) = btrees();
+        let iter = union(btree1.iter(), btree2.iter()).copied();
+
+        assert!(iter.eq(["Hello", "See you!", "and", "bye", "hi", "there!"]));
     }
 }
