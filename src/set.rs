@@ -1,24 +1,20 @@
 use std::iter::Peekable;
-use std::marker::PhantomData;
 
 /// Convenience trait for `Iterator<Item = T> -> Iter<T>`.
 pub trait Iter<T>: Iterator<Item = T> {}
 impl<T, I: Iterator<Item = T>> Iter<T> for I {}
 
 #[derive(Debug)]
-pub struct Deduplicate<T, I: Iter<T>> {
+pub struct Deduplicate<T, I>
+where
+    I: Iterator<Item = T>,
+{
     iter: Peekable<I>,
-    current: Option<T>,
-    _t: PhantomData<T>,
 }
 impl<T, I: Iter<T>> Deduplicate<T, I> {
     fn new(iter: I) -> Self {
-        let mut iter = iter;
-        let next = iter.next();
         Self {
             iter: iter.peekable(),
-            current: next,
-            _t: PhantomData,
         }
     }
 }
@@ -26,21 +22,27 @@ impl<T: PartialEq, I: Iter<T>> Iterator for Deduplicate<T, I> {
     type Item = T;
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let next = self.iter.peek();
-            if next.is_none() {
-                return self.current.take();
-            }
-            if next == self.current.as_ref() {
-                self.current = self.iter.next();
-            } else {
-                let current = self.current.take();
-                self.current = self.iter.next();
-                return current;
+            let next = match self.iter.next() {
+                Some(next) => next,
+                None => return None,
+            };
+
+            let peeked = match self.iter.peek() {
+                Some(peeked) => peeked,
+                None => return Some(next),
+            };
+
+            if &next != peeked {
+                return Some(next);
             }
         }
     }
 }
-pub fn deduplicate<T, I: Iter<T>>(iter: I) -> Deduplicate<T, I> {
+/// Removes consecutive duplicate items.
+///
+/// This works best for sorted iterators (e.g. [`std::collections::BTreeMap::iter`]) as they
+/// always have any duplicate items right after each other.
+pub fn deduplicate<T: PartialEq, I: Iter<T>>(iter: I) -> Deduplicate<T, I> {
     Deduplicate::new(iter)
 }
 
