@@ -1,6 +1,6 @@
 use std::fmt::{self, Debug, Display};
 
-use crate::index::{self, Provider};
+use crate::index::{self};
 use crate::set;
 pub use parse::{parse, Options as ParseOptions};
 
@@ -90,32 +90,32 @@ impl Part {
     fn iter_to_box<'a, T>(iter: impl Iterator<Item = T> + 'a) -> Box<dyn Iterator<Item = T> + 'a> {
         Box::new(iter)
     }
-    fn as_doc_iter<'a>(
+    fn as_doc_iter<'a, T: Ord + 'a, I: Iterator<Item = T> + 'a>(
         &self,
-        provider: &'a impl index::Provider<'a>,
-    ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
+        iter: &(impl Fn(&str) -> Option<I> + 'a),
+    ) -> Result<impl Iterator<Item = T> + 'a, IterError> {
         let iter = match self {
             Self::And(pair) => match (&pair.left, &pair.right) {
                 // `matches!` instead of `Part::And(and)` to not destruct the enum.
                 (and, Part::Not(not)) | (Part::Not(not), and) if matches!(and, Part::And(_)) => {
                     Self::iter_to_box(set::difference(
-                        and.as_doc_iter(provider)?,
-                        not.as_doc_iter(provider)?,
+                        and.as_doc_iter(iter)?,
+                        not.as_doc_iter(iter)?,
                     ))
                 }
                 _ => Self::iter_to_box(set::intersect(
-                    pair.left.as_doc_iter(provider)?,
-                    pair.right.as_doc_iter(provider)?,
+                    pair.left.as_doc_iter(iter)?,
+                    pair.right.as_doc_iter(iter)?,
                 )),
             },
             Self::Or(pair) => Self::iter_to_box(set::union(
-                pair.left.as_doc_iter(provider)?,
-                pair.right.as_doc_iter(provider)?,
+                pair.left.as_doc_iter(iter)?,
+                pair.right.as_doc_iter(iter)?,
             )),
             Self::Not(_) => return Err(IterError::StrayNot),
-            Self::String(s) => provider
-                .documents_with_word(s)
-                .map_or_else(|| Self::iter_to_box(std::iter::empty()), Self::iter_to_box),
+            Self::String(s) => {
+                iter(s).map_or_else(|| Self::iter_to_box(std::iter::empty()), Self::iter_to_box)
+            }
         };
         Ok(iter)
     }
@@ -161,7 +161,7 @@ impl Query {
         &self,
         provider: &'a impl index::Provider<'a>,
     ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
-        self.root.as_doc_iter(provider)
+        self.root.as_doc_iter(&|s| provider.documents_with_word(s))
     }
 }
 
