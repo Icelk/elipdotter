@@ -9,8 +9,9 @@
 //! `O(n * log n)` is very close to `O(n)`.
 
 use std::cmp;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{btree_set, BTreeMap, BTreeSet, HashMap};
 use std::fmt::{Debug, Display};
+use std::iter::Copied;
 use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
@@ -183,11 +184,11 @@ impl DocumentMap {
     /// Alternatively, [`Self::reserve_id`] and then drop the lock, go to a different thread, and
     /// make a new [`Simple`]. [`Simple::digest_document`], then [`Simple::ingest`] the
     /// second index into the first.
-    pub fn insert(
+    pub fn insert<'a>(
         &mut self,
         name: impl Into<String> + AsRef<str>,
         content: &str,
-        provider: &mut impl Provider,
+        provider: &mut impl Provider<'a>,
     ) {
         let id = self.reserve_id(name);
         provider.digest_document(id, content);
@@ -225,7 +226,7 @@ impl DocumentMap {
     //  If we have UUIDs instead, we can just remove the Id from `self`,
     //  as any attempts to resolve that into a path will fail.
     #[allow(clippy::missing_panics_doc)]
-    pub fn force_remove(&mut self, document: Id, provider: &mut impl Provider) {
+    pub fn force_remove<'a>(&mut self, document: Id, provider: &mut impl Provider<'a>) {
         let previous = if let Some(prev) = self.id_to_name.remove(&document) {
             prev
         } else {
@@ -256,10 +257,13 @@ impl WordOccurrence {
     }
 }
 /// Allows to insert words and remove occurrences from documents.
-pub trait Provider {
+pub trait Provider<'a> {
+    type DocumentIter: Iterator<Item = Id> + ExactSizeIterator + 'a;
+
     fn insert_word(&mut self, word: impl AsRef<str>, document: Id);
     fn remove_document(&mut self, document: Id);
     fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool;
+    fn documents_with_word(&'a self, word: impl AsRef<str>) -> Option<Self::DocumentIter>;
 
     /// Only adds words which are alphanumeric.
     fn digest_document(&mut self, id: Id, content: &str) {
@@ -277,6 +281,10 @@ pub trait Provider {
             self.insert_word(word, id);
         }
     }
+}
+pub trait OccurenceProvider<'a> {
+    type Iter: Iterator<Item = Occurence>;
+    fn occurrences_of_word(&'a mut self, word: &'a str) -> Option<Self::Iter>;
 }
 
 #[derive(Debug)]
@@ -301,7 +309,7 @@ impl SimpleDocRef {
     pub fn contains(&self, document: Id) -> bool {
         self.docs.contains(&document)
     }
-    pub fn documents(&self) -> impl Iterator<Item = Id> + ExactSizeIterator + '_ {
+    pub fn documents(&self) -> Copied<btree_set::Iter<'_, Id>> {
         self.docs.iter().copied()
     }
 }
@@ -322,23 +330,6 @@ impl Simple {
             words: BTreeMap::new(),
         }
     }
-
-    /// O(log n)
-    ///
-    /// Iterator is O(1) - running this and consuming the iterator is O(n log n).
-    ///
-    /// You can get the length of the list using the [`ExactSizeIterator`] trait.
-    pub fn documents_with_word(
-        &self,
-        word: impl AsRef<str>,
-    ) -> Option<impl Iterator<Item = Id> + ExactSizeIterator + '_> {
-        // SAFETY: We only use `StrPtr` in the current scope.
-        let ptr = unsafe { StrPtr::sref(word.as_ref()) };
-        self.words
-            .get(&Alphanumeral::new(ptr))
-            .map(SimpleDocRef::documents)
-    }
-
     /// Merges `other` with `self`.
     pub fn ingest(&mut self, other: Self) {
         for (word, docs) in other.words {
@@ -357,7 +348,9 @@ impl Default for Simple {
         Self::new()
     }
 }
-impl<'b> Provider for Simple {
+impl<'a> Provider<'a> for Simple {
+    type DocumentIter = Copied<btree_set::Iter<'a, Id>>;
+
     /// O(log n log n)
     fn insert_word(&mut self, word: impl AsRef<str>, document: Id) {
         let word = word.as_ref();
@@ -390,6 +383,18 @@ impl<'b> Provider for Simple {
         self.words
             .get(&Alphanumeral::new(ptr))
             .map_or(false, |word| word.contains(document))
+    }
+    /// O(log n)
+    ///
+    /// Iterator is O(1) - running this and consuming the iterator is O(n log n).
+    ///
+    /// You can get the length of the list using the [`ExactSizeIterator`] trait.
+    fn documents_with_word(&'a self, word: impl AsRef<str>) -> Option<Self::DocumentIter> {
+        // SAFETY: We only use `StrPtr` in the current scope.
+        let ptr = unsafe { StrPtr::sref(word.as_ref()) };
+        self.words
+            .get(&Alphanumeral::new(ptr))
+            .map(SimpleDocRef::documents)
     }
 }
 fn word_pattern(c: char) -> bool {
@@ -485,10 +490,10 @@ impl<'a> SimpleProvider<'a> {
     pub fn add_document(&mut self, id: Id, content: Arc<String>) {
         self.document_contents.insert(id, content);
     }
-    pub fn occurrences_of_word(
-        &'a mut self,
-        word: &'a str,
-    ) -> Option<SimpleOccurrencesIter<'a, impl Iterator<Item = Id> + 'a>> {
+}
+impl<'a> OccurenceProvider<'a> for SimpleProvider<'a> {
+    type Iter = SimpleOccurrencesIter<'a, Copied<btree_set::Iter<'a, Id>>>;
+    fn occurrences_of_word(&'a mut self, word: &'a str) -> Option<Self::Iter> {
         // SAFETY: We only use `StrPtr` in the current scope.
         let ptr = unsafe { StrPtr::sref(word) };
         let doc_ref = self.index.words.get(&Alphanumeral::new(ptr))?;
@@ -512,7 +517,10 @@ impl<'a> SimpleProvider<'a> {
 // word once, instead of x times, where x is the occurrences of the word in the text.
 #[cfg(test)]
 mod tests {
-    use super::{Alphanumeral, DocumentMap, Id, Occurence, Provider, Simple, SimpleProvider};
+    use super::{
+        Alphanumeral, DocumentMap, Id, Occurence, OccurenceProvider, Provider, Simple,
+        SimpleProvider,
+    };
 
     fn doc1() -> &'static str {
         "\
