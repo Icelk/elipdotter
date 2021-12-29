@@ -1,6 +1,6 @@
 use std::fmt::{self, Debug, Display};
 
-use crate::index::{self};
+use crate::index;
 use crate::set;
 pub use parse::{parse, Options as ParseOptions};
 
@@ -92,7 +92,7 @@ impl Part {
     }
     fn as_doc_iter<'a, T: Ord + 'a, I: Iterator<Item = T> + 'a>(
         &self,
-        iter: &(impl Fn(&str) -> Option<I> + 'a),
+        iter: &mut (impl FnMut(&str) -> Option<I> + 'a),
     ) -> Result<impl Iterator<Item = T> + 'a, IterError> {
         let iter = match self {
             Self::And(pair) => match (&pair.left, &pair.right) {
@@ -157,11 +157,29 @@ impl Query {
     ///
     /// This is due to a limitation of the index architecture used by this library,
     /// and almost all other search engines.
-    pub fn documents_with_results<'a>(
+    pub fn documents<'a>(
         &self,
         provider: &'a impl index::Provider<'a>,
     ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
-        self.root.as_doc_iter(&|s| provider.documents_with_word(s))
+        self.root
+            .as_doc_iter(&mut |s| provider.documents_with_word(s))
+    }
+    /// # Errors
+    ///
+    /// See [`Self::documents`].
+    ///
+    /// # Panics
+    ///
+    /// Some implementations of [`index::OccurenceProvider`] panic under certain circumstances.
+    ///
+    /// [`index::SimpleOccurences`], for example, panics if you haven't supplied all the necessary
+    /// documents.
+    pub fn occurences<'a>(
+        &self,
+        provider: &'a mut impl index::OccurenceProvider<'a>,
+    ) -> Result<impl Iterator<Item = index::Occurence> + 'a, IterError> {
+        self.root
+            .as_doc_iter(&mut |s| provider.occurrences_of_word(s))
     }
 }
 

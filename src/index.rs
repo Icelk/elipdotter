@@ -12,7 +12,7 @@ use std::cmp;
 use std::collections::{btree_set, BTreeMap, BTreeSet, HashMap};
 use std::fmt::{Debug, Display};
 use std::iter::Copied;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
 pub struct Id(u64);
@@ -96,6 +96,8 @@ impl<T: AsRef<str>> Display for Alphanumeral<T> {
     }
 }
 
+/// Needed to index [custom struct](Alphanumeral) in maps.
+/// We have to have the same type, so this acts as both the borrowed and owned.
 struct StrPtr {
     s: *const str,
     drop: bool,
@@ -283,8 +285,8 @@ pub trait Provider<'a> {
     }
 }
 pub trait OccurenceProvider<'a> {
-    type Iter: Iterator<Item = Occurence>;
-    fn occurrences_of_word(&'a mut self, word: &'a str) -> Option<Self::Iter>;
+    type Iter: Iterator<Item = Occurence> + 'a;
+    fn occurrences_of_word(&'a self, word: &str) -> Option<Self::Iter>;
 }
 
 #[derive(Debug)]
@@ -403,7 +405,10 @@ fn word_pattern(c: char) -> bool {
 #[derive(Debug)]
 pub struct SimpleOccurrencesIter<'a, I> {
     iter: I,
-    word: &'a str,
+    // `TODO`: Optimize
+    // Reason for allocation:
+    //  `OccurenceProvider::occurrences_of_word` requires the `&str` to not have the `'a` lifetime.
+    word: String,
 
     document_contents: &'a HashMap<Id, Arc<String>>,
 
@@ -412,14 +417,14 @@ pub struct SimpleOccurrencesIter<'a, I> {
     current_pos: usize,
     current_doc_matched: bool,
 
-    missing: &'a mut Vec<Id>,
+    missing: &'a Mutex<Vec<Id>>,
 }
 impl<'a, I: Iterator<Item = Id>> SimpleOccurrencesIter<'a, I> {
     fn new(
         iter: I,
-        word: &'a str,
+        word: String,
         document_contents: &'a HashMap<Id, Arc<String>>,
-        missing: &'a mut Vec<Id>,
+        missing: &'a Mutex<Vec<Id>>,
     ) -> Self {
         Self {
             iter,
@@ -450,7 +455,11 @@ impl<'a, I: Iterator<Item = Id>> Iterator for SimpleOccurrencesIter<'a, I> {
             }
 
             if !self.current_doc_matched {
-                self.missing.push(*doc_id);
+                let mut missing = self.missing.lock().expect(
+                    "lock is poisoned, other thread panicked.\
+                    This should anyway not be accessed from multiple threads simultaneously",
+                );
+                missing.push(*doc_id);
             }
         }
 
@@ -473,53 +482,49 @@ fn failed_to_find_document_in_provided_documents() -> ! {
 }
 #[derive(Debug)]
 #[must_use]
-pub struct SimpleProvider<'a> {
+pub struct SimpleOccurences<'a> {
     index: &'a Simple,
     document_contents: HashMap<Id, Arc<String>>,
 
-    missing: Vec<Id>,
+    missing: Mutex<Vec<Id>>,
 }
-impl<'a> SimpleProvider<'a> {
+/// # Panics
+///
+/// Using the [`OccurenceProvider::occurrences_of_word`] may panic, if not all documents returned
+/// from [`Provider::documents_with_word`]. If a document doesn't exist, still [`Self::add_document`],
+/// but with an empty [`String`].
+impl<'a> SimpleOccurences<'a> {
     pub fn new(index: &'a Simple) -> Self {
         Self {
             index,
             document_contents: HashMap::new(),
-            missing: Vec::new(),
+            missing: Mutex::new(Vec::new()),
         }
     }
     pub fn add_document(&mut self, id: Id, content: Arc<String>) {
         self.document_contents.insert(id, content);
     }
 }
-impl<'a> OccurenceProvider<'a> for SimpleProvider<'a> {
+impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
     type Iter = SimpleOccurrencesIter<'a, Copied<btree_set::Iter<'a, Id>>>;
-    fn occurrences_of_word(&'a mut self, word: &'a str) -> Option<Self::Iter> {
+    fn occurrences_of_word(&'a self, word: &str) -> Option<Self::Iter> {
         // SAFETY: We only use `StrPtr` in the current scope.
         let ptr = unsafe { StrPtr::sref(word) };
         let doc_ref = self.index.words.get(&Alphanumeral::new(ptr))?;
         Some(SimpleOccurrencesIter::new(
             doc_ref.docs.iter().copied(),
-            word,
+            word.into(),
             &self.document_contents,
-            &mut self.missing,
+            &self.missing,
         ))
     }
 }
-// Simple with read data. If cache doesn't contain the needed word, panic.
-// Write about this behaviour in the docs. Make clear you have to add all the ones
-// you plan on looking up to the cache.
-//
-// When query resolves to more than 100 documents, cap?
-// How to determine which to use?
-// Say the query gave too many documents and do nothing?
-//
-// When digesting, spawn tasks. Make their own Simple, which can be merged. They'll only check each
-// word once, instead of x times, where x is the occurrences of the word in the text.
+
 #[cfg(test)]
 mod tests {
     use super::{
         Alphanumeral, DocumentMap, Id, Occurence, OccurenceProvider, Provider, Simple,
-        SimpleProvider,
+        SimpleOccurences,
     };
 
     fn doc1() -> &'static str {
@@ -558,7 +563,7 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
         assert_eq!(doc_map.get_id("doc3"), Some(Id::new(1)));
         assert_eq!(doc_map.get_id("doc2"), None);
 
-        let mut simple_provider = SimpleProvider::new(&index);
+        let mut simple_provider = SimpleOccurences::new(&index);
         simple_provider.add_document(doc_map.get_id("doc1").unwrap(), doc1().to_string().into());
         simple_provider.add_document(doc_map.get_id("doc3").unwrap(), doc2().to_string().into());
 
