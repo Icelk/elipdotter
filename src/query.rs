@@ -625,7 +625,7 @@ pub mod parse {
         pub fn new(prefix: &'static str) -> Self {
             Self {
                 prefix,
-                last_was_space: false,
+                last_was_space: true,
             }
         }
     }
