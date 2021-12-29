@@ -1,6 +1,7 @@
 //! # Big O notation reference
 //!
 //! `O(1) < O(log n) < O(log n * log n) < O(sqrt(n)) < O(n) < O(n * log n) < O(n^1.1) < O(n²) < O(n³) < O(2^n)`
+//!
 //! `O(sqrt(n))` is true for all `sqrt(n^m)` where `0<m<1`.
 //!
 //! Since `O(log n)` is very close to `O(1)`,
@@ -164,23 +165,31 @@ impl DocumentMap {
             id_to_name: BTreeMap::new(),
         }
     }
-    /// Alternatively, [`Self::reserve_id`] and then drop the lock, go to a different thread, and
-    /// make a new [`Simple`]. [`ProviderCore::digest_document`], then [`ProviderCore::ingest`] the
-    /// second index into the first.
     #[allow(clippy::missing_panics_doc)]
-    pub fn insert(&mut self, name: impl Into<String>, content: &str, provider: &mut impl Provider) {
-        let name = name.into();
-
-        if let Some(id) = self.get_id(&name) {
-            provider.digest_document(id, content);
-            return;
+    pub fn reserve_id(&mut self, name: impl Into<String> + AsRef<str>) -> Id {
+        if let Some(id) = self.get_id(name.as_ref()) {
+            return id;
         }
+
+        let name = name.into();
 
         let id = self.get_first();
 
         self.name_to_id.insert(name.clone(), id);
         let old_doc = self.id_to_name.insert(id, name);
         assert_eq!(old_doc, None);
+        id
+    }
+    /// Alternatively, [`Self::reserve_id`] and then drop the lock, go to a different thread, and
+    /// make a new [`Simple`]. [`Simple::digest_document`], then [`Simple::ingest`] the
+    /// second index into the first.
+    pub fn insert(
+        &mut self,
+        name: impl Into<String> + AsRef<str>,
+        content: &str,
+        provider: &mut impl Provider,
+    ) {
+        let id = self.reserve_id(name);
         provider.digest_document(id, content);
     }
     fn get_first(&self) -> Id {
