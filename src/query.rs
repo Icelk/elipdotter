@@ -175,10 +175,38 @@ impl Query {
     /// documents.
     pub fn occurences<'a>(
         &self,
-        provider: &'a mut impl index::OccurenceProvider<'a>,
+        provider: &'a impl index::OccurenceProvider<'a>,
     ) -> Result<impl Iterator<Item = index::Occurence> + 'a, IterError> {
+        struct OccurenceEq(index::Occurence);
+        impl OccurenceEq {
+            fn inner(self) -> index::Occurence {
+                self.0
+            }
+        }
+        impl PartialEq for OccurenceEq {
+            fn eq(&self, other: &Self) -> bool {
+                self.0.id().eq(&other.0.id())
+            }
+        }
+        impl Eq for OccurenceEq {}
+        impl Ord for OccurenceEq {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.0.id().cmp(&other.0.id())
+            }
+        }
+        impl PartialOrd for OccurenceEq {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
         self.root
-            .as_doc_iter(&mut |s| provider.occurrences_of_word(s))
+            .as_doc_iter(&mut |s| {
+                provider
+                    .occurrences_of_word(s)
+                    .map(|iter| iter.map(OccurenceEq))
+            })
+            .map(|iter| iter.map(OccurenceEq::inner))
     }
 }
 
