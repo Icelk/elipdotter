@@ -1,6 +1,43 @@
 use std::fmt::{self, Debug, Display};
 
+use crate::index::{self, Provider};
+use crate::set;
 pub use parse::{parse, Options as ParseOptions};
+
+#[derive(Debug, Clone)]
+#[must_use]
+/// Eq implementation doesn't care of which is left and right.
+pub struct BinaryPart {
+    pub left: Part,
+    pub right: Part,
+}
+impl BinaryPart {
+    pub fn new(left: Part, right: Part) -> Self {
+        Self { left, right }
+    }
+    #[must_use]
+    pub fn into_box(self) -> Box<Self> {
+        Box::new(self)
+    }
+    /// Swaps [`Self::left`] and [`Self::right`].
+    ///
+    /// This does not affect [`Eq`].
+    pub fn swap(&mut self) {
+        std::mem::swap(&mut self.left, &mut self.right);
+    }
+    /// Tests the equality of the parts AND order of [`Self::left`] & [`Self::right`].
+    #[must_use]
+    pub fn eq_order(&self, other: &Self) -> bool {
+        self.left.eq_order(&other.left) && self.right.eq_order(&other.right)
+    }
+}
+impl PartialEq for BinaryPart {
+    fn eq(&self, other: &Self) -> bool {
+        (self.left == other.left && self.right == other.right)
+            || (self.left == other.right && self.right == other.left)
+    }
+}
+impl Eq for BinaryPart {}
 
 #[derive(PartialEq, Eq, Clone)]
 #[must_use]
@@ -47,6 +84,41 @@ impl Part {
             }
         }
     }
+    /// Casts a generic [`Iterator`] to a [`dyn`](https://doc.rust-lang.org/std/keyword.dyn.html) one.
+    ///
+    /// This is a convenience function as the cast is hard inline.
+    fn iter_to_box<'a, T>(iter: impl Iterator<Item = T> + 'a) -> Box<dyn Iterator<Item = T> + 'a> {
+        Box::new(iter)
+    }
+    fn as_doc_iter<'a>(
+        &self,
+        provider: &'a impl index::Provider<'a>,
+    ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
+        let iter = match self {
+            Self::And(pair) => match (&pair.left, &pair.right) {
+                // `matches!` instead of `Part::And(and)` to not destruct the enum.
+                (and, Part::Not(not)) | (Part::Not(not), and) if matches!(and, Part::And(_)) => {
+                    Self::iter_to_box(set::difference(
+                        and.as_doc_iter(provider)?,
+                        not.as_doc_iter(provider)?,
+                    ))
+                }
+                _ => Self::iter_to_box(set::intersect(
+                    pair.left.as_doc_iter(provider)?,
+                    pair.right.as_doc_iter(provider)?,
+                )),
+            },
+            Self::Or(pair) => Self::iter_to_box(set::union(
+                pair.left.as_doc_iter(provider)?,
+                pair.right.as_doc_iter(provider)?,
+            )),
+            Self::Not(_) => return Err(IterError::StrayNot),
+            Self::String(s) => provider
+                .documents_with_word(s)
+                .map_or_else(|| Self::iter_to_box(std::iter::empty()), Self::iter_to_box),
+        };
+        Ok(iter)
+    }
 }
 impl<T: Into<String>> From<T> for Part {
     fn from(s: T) -> Self {
@@ -72,44 +144,30 @@ impl Display for Part {
     }
 }
 
-#[derive(Debug, Clone)]
-#[must_use]
-/// Eq implementation doesn't care of which is left and right.
-pub struct BinaryPart {
-    pub left: Part,
-    pub right: Part,
-}
-impl BinaryPart {
-    pub fn new(left: Part, right: Part) -> Self {
-        Self { left, right }
-    }
-    #[must_use]
-    pub fn into_box(self) -> Box<Self> {
-        Box::new(self)
-    }
-    /// Swaps [`Self::left`] and [`Self::right`].
-    ///
-    /// This does not affect [`Eq`].
-    pub fn swap(&mut self) {
-        std::mem::swap(&mut self.left, &mut self.right);
-    }
-    /// Tests the equality of the parts AND order of [`Self::left`] & [`Self::right`].
-    #[must_use]
-    pub fn eq_order(&self, other: &Self) -> bool {
-        self.left.eq_order(&other.left) && self.right.eq_order(&other.right)
-    }
-}
-impl PartialEq for BinaryPart {
-    fn eq(&self, other: &Self) -> bool {
-        (self.left == other.left && self.right == other.right)
-            || (self.left == other.right && self.right == other.left)
-    }
-}
-impl Eq for BinaryPart {}
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[must_use]
 pub struct Query {
     root: Part,
+}
+impl Query {
+    /// # Errors
+    ///
+    /// If a [`Part::Not`] isn't associated with a [`Part::And`], [`IterError::StrayNot`] is
+    /// returned.
+    ///
+    /// This is due to a limitation of the index architecture used by this library,
+    /// and almost all other search engines.
+    pub fn documents_with_results<'a>(
+        &self,
+        provider: &'a impl index::Provider<'a>,
+    ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
+        self.root.as_doc_iter(provider)
+    }
+}
+
+#[derive(Debug)]
+pub enum IterError {
+    StrayNot,
 }
 
 pub mod parse {
