@@ -146,6 +146,9 @@ pub struct Query {
     root: Part,
 }
 impl Query {
+    fn new(root: Part) -> Self {
+        Self { root }
+    }
     /// # Errors
     ///
     /// If a [`Part::Not`] isn't associated with a [`Part::And`], [`IterError::StrayNot`] is
@@ -186,10 +189,22 @@ pub enum IterError {
 
 pub mod parse {
     use std::fmt::Debug;
+    use std::str::FromStr;
 
-    use crate::query::BinaryPart;
+    use super::{BinaryPart, Part, Query};
 
-    use super::Part;
+    impl FromStr for Query {
+        type Err = Error;
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            s.parse().map(Query::new)
+        }
+    }
+    impl FromStr for Part {
+        type Err = Error;
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            parse(s, Options::default())
+        }
+    }
 
     #[allow(clippy::missing_panics_doc)]
     #[allow(clippy::missing_errors_doc)]
