@@ -96,13 +96,9 @@ impl Part {
     ) -> Result<impl Iterator<Item = T> + 'a, IterError> {
         let iter = match self {
             Self::And(pair) => match (&pair.left, &pair.right) {
-                // `matches!` instead of `Part::And(and)` to not destruct the enum.
-                (and, Part::Not(not)) | (Part::Not(not), and) if matches!(and, Part::And(_)) => {
-                    Self::iter_to_box(set::difference(
-                        and.as_doc_iter(iter)?,
-                        not.as_doc_iter(iter)?,
-                    ))
-                }
+                (other, Part::Not(not)) | (Part::Not(not), other) => Self::iter_to_box(
+                    set::difference(other.as_doc_iter(iter)?, not.as_doc_iter(iter)?),
+                ),
                 _ => Self::iter_to_box(set::intersect(
                     pair.left.as_doc_iter(iter)?,
                     pair.right.as_doc_iter(iter)?,
