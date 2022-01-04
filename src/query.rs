@@ -1,6 +1,8 @@
+use std::collections::BTreeSet;
 use std::fmt::{self, Debug, Display};
 
-use crate::index;
+use crate::index::Occurence;
+use crate::index::{self, ConditionalOccurrence};
 use crate::set;
 pub use parse::{parse, Options as ParseOptions};
 
@@ -90,23 +92,41 @@ impl Part {
     fn iter_to_box<'a, T>(iter: impl Iterator<Item = T> + 'a) -> Box<dyn Iterator<Item = T> + 'a> {
         Box::new(iter)
     }
-    fn as_doc_iter<'a, T: Ord + 'a, I: Iterator<Item = T> + 'a>(
+    fn as_doc_iter<
+        'a,
+        T: Ord + 'a,
+        I: Iterator<Item = T> + 'a,
+        ModI: Iterator<Item = T> + 'a,
+        AndMI: Iterator<Item = T> + 'a,
+    >(
         &self,
         iter: &mut (impl FnMut(&str) -> Option<I> + 'a),
-    ) -> Result<impl Iterator<Item = T> + 'a, IterError> {
+        and_not_modify: &impl Fn(
+            Box<dyn Iterator<Item = T> + 'a>,
+            Box<dyn Iterator<Item = T> + 'a>,
+        ) -> ModI,
+        and_merger: &impl Fn(
+            Box<dyn Iterator<Item = T> + 'a>,
+            Box<dyn Iterator<Item = T> + 'a>,
+        ) -> AndMI,
+    ) -> Result<Box<dyn Iterator<Item = T> + 'a>, IterError> {
         let iter = match self {
             Self::And(pair) => match (&pair.left, &pair.right) {
                 (other, Part::Not(not)) | (Part::Not(not), other) => Self::iter_to_box(
-                    set::difference(other.as_doc_iter(iter)?, not.as_doc_iter(iter)?),
+                    // set::difference(other.as_doc_iter(iter, and_not_modify)?, not.as_doc_iter(iter, and_not_modify)?),
+                    and_not_modify(
+                        other.as_doc_iter(iter, and_not_modify, and_merger)?,
+                        not.as_doc_iter(iter, and_not_modify, and_merger)?,
+                    ),
                 ),
-                _ => Self::iter_to_box(set::intersect(
-                    pair.left.as_doc_iter(iter)?,
-                    pair.right.as_doc_iter(iter)?,
+                _ => Self::iter_to_box(and_merger(
+                    pair.left.as_doc_iter(iter, and_not_modify, and_merger)?,
+                    pair.right.as_doc_iter(iter, and_not_modify, and_merger)?,
                 )),
             },
             Self::Or(pair) => Self::iter_to_box(set::union(
-                pair.left.as_doc_iter(iter)?,
-                pair.right.as_doc_iter(iter)?,
+                pair.left.as_doc_iter(iter, and_not_modify, and_merger)?,
+                pair.right.as_doc_iter(iter, and_not_modify, and_merger)?,
             )),
             Self::Not(_) => return Err(IterError::StrayNot),
             Self::String(s) => {
@@ -160,8 +180,11 @@ impl Query {
         &self,
         provider: &'a impl index::Provider<'a>,
     ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
-        self.root
-            .as_doc_iter(&mut |s| provider.documents_with_word(s))
+        self.root.as_doc_iter(
+            &mut |s| provider.documents_with_word(s),
+            &|i, _| i,
+            &set::intersect,
+        )
     }
     /// # Errors
     ///
@@ -173,14 +196,64 @@ impl Query {
     ///
     /// [`index::SimpleOccurences`], for example, panics if you haven't supplied all the necessary
     /// documents.
+    #[allow(clippy::too_many_lines)]
     pub fn occurences<'a>(
         &self,
         provider: &'a impl index::OccurenceProvider<'a>,
-    ) -> Result<impl Iterator<Item = index::Occurence> + 'a, IterError> {
-        struct OccurenceEq(index::Occurence);
+    ) -> Result<impl Iterator<Item = Hit> + 'a, IterError> {
+        struct OccurenceEq(Hit);
         impl OccurenceEq {
-            fn inner(self) -> index::Occurence {
+            fn new(occ: Occurence) -> Self {
+                Self(Hit {
+                    occurrence: occ,
+                    rating: 0.0,
+                    conditional_occurrences: BTreeSet::new(),
+                })
+            }
+            fn inner(self) -> Hit {
                 self.0
+            }
+            #[must_use]
+            fn closest(&self, other: &Self) -> usize {
+                use std::cmp::Ordering;
+                let mut closest = usize::MAX;
+                let mut a_iter = self.0.conditional_occurrences().map(|c| c.start());
+                // If `conditional_occurrences` has len 0, use only start.
+                // Else, it'll have >=2 occurences, since the `.start()` is also taken as part of
+                // the BTreeSet.
+                let mut a = a_iter.next().unwrap_or_else(|| self.0.start());
+                let mut b_iter = other.0.conditional_occurrences().map(|c| c.start());
+                let mut b = b_iter.next().unwrap_or_else(|| other.0.start());
+                let mut one_completed = false;
+                loop {
+                    let dist = if a > b { a - b } else { b - a };
+                    closest = std::cmp::min(dist, closest);
+                    match a.cmp(&b) {
+                        Ordering::Less => {
+                            if let Some(next) = a_iter.next() {
+                                a = next;
+                            } else if one_completed {
+                                break;
+                            } else {
+                                one_completed = true;
+                            }
+                        }
+                        // The words are at the same place!
+                        //
+                        // This is technically not reachable, but the following codes makes sense.
+                        Ordering::Equal => return 0,
+                        Ordering::Greater => {
+                            if let Some(next) = b_iter.next() {
+                                b = next;
+                            } else if one_completed {
+                                break;
+                            } else {
+                                one_completed = true;
+                            }
+                        }
+                    }
+                }
+                closest
             }
         }
         impl PartialEq for OccurenceEq {
@@ -201,12 +274,103 @@ impl Query {
         }
 
         self.root
-            .as_doc_iter(&mut |s| {
-                provider
-                    .occurrences_of_word(s)
-                    .map(|iter| iter.map(OccurenceEq))
-            })
+            .as_doc_iter(
+                &mut |s| {
+                    provider
+                        .occurrences_of_word(s)
+                        .map(|iter| iter.map(OccurenceEq::new))
+                },
+                &|and, not| {
+                    iter_set::classify(and, not).filter_map(|inclusion| match inclusion {
+                        iter_set::Inclusion::Left(mut and) => {
+                            let mut closest = usize::MAX;
+                            let mut iter = and.0.conditional_occurrences();
+                            let mut last =
+                                iter.next().unwrap_or_else(|| ConditionalOccurrence::new(0));
+                            for occ in iter {
+                                let dist = occ.start() - last.start();
+                                closest = std::cmp::min(dist, closest);
+                                last = occ;
+                            }
+                            if closest < usize::MAX {
+                                // Don't really care about precision.
+                                #[allow(clippy::cast_precision_loss)]
+                                let rating_increase = 1.0 / (0.001 * closest as f32 + 0.1);
+                                and.0.rating += rating_increase;
+                            }
+                            Some(and)
+                        }
+                        iter_set::Inclusion::Right(_not) => None,
+                        iter_set::Inclusion::Both(mut and, not) => {
+                            let closest = and.closest(&not);
+                            // Don't really care about precision.
+                            #[allow(clippy::cast_precision_loss)]
+                            let rating_decrease = 1.0 / (0.01 * closest as f32 + 0.1);
+                            and.0.rating -= rating_decrease;
+                            Some(and)
+                        }
+                    })
+                },
+                &|left, right| {
+                    iter_set::classify(left, right).filter_map(|inclusion| {
+                        if let iter_set::Inclusion::Both(mut a, b) = inclusion {
+                            a.0.merge(&b.0);
+                            Some(a)
+                        } else {
+                            None
+                        }
+                    })
+                },
+            )
             .map(|iter| iter.map(OccurenceEq::inner))
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Hit {
+    occurrence: Occurence,
+
+    rating: f32,
+    conditional_occurrences: BTreeSet<ConditionalOccurrence>,
+}
+impl Hit {
+    /// Get a reference to the hit's document id.
+    #[must_use]
+    pub fn id(&self) -> index::Id {
+        self.occurrence.id()
+    }
+    /// Get a reference to the hit's document id.
+    ///
+    /// This might be any of the [`Self::conditional_occurrences`] if that returns any items.
+    #[must_use]
+    pub fn start(&self) -> usize {
+        self.occurrence.start()
+    }
+    /// Get a reference to the hit's occurence.
+    #[must_use]
+    pub fn occurence(&self) -> &Occurence {
+        &self.occurrence
+    }
+    /// Get the hit's rating.
+    #[must_use]
+    pub fn rating(&self) -> f32 {
+        self.rating
+    }
+    pub fn conditional_occurrences(&self) -> impl Iterator<Item = ConditionalOccurrence> + '_ {
+        self.conditional_occurrences.iter().copied()
+    }
+
+    /// Must have the same [document id](id()).
+    fn merge(&mut self, other: &Self) {
+        if self.conditional_occurrences.is_empty() {
+            self.conditional_occurrences
+                .insert(index::ConditionalOccurrence::new(self.start()));
+        }
+        for other_occ in other.conditional_occurrences() {
+            self.conditional_occurrences.insert(other_occ);
+        }
+        self.conditional_occurrences
+            .insert(index::ConditionalOccurrence::new(other.start()));
     }
 }
 

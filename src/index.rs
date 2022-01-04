@@ -27,18 +27,40 @@ impl Id {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
-pub struct Occurence(usize, Id);
+pub struct Occurence {
+    start: usize,
+    document_id: Id,
+}
 impl Occurence {
     fn new(pos: usize, document_id: Id) -> Self {
-        Self(pos, document_id)
+        Self {
+            start: pos,
+            document_id,
+        }
     }
     #[must_use]
     pub fn start(&self) -> usize {
-        self.0
+        self.start
     }
     #[must_use]
     pub fn id(&self) -> Id {
-        self.1
+        self.document_id
+    }
+}
+/// If [`Occurence`] is part of an AND, these can be associated to tell where the other parts of
+/// the AND chain are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ConditionalOccurrence {
+    start: usize,
+}
+impl ConditionalOccurrence {
+    pub(crate) fn new(start: usize) -> Self {
+        Self { start }
+    }
+    /// Get the conditional occurrence's start.
+    #[must_use]
+    pub fn start(&self) -> usize {
+        self.start
     }
 }
 

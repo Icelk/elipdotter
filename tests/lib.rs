@@ -65,8 +65,6 @@ fn query_and() {
 }
 #[test]
 fn query_and_not_1() {
-    // volutpat exists in both.
-    // hac exists only in the second
     let q = pq("feugiat -sem");
     let (_, index) = docs();
 
@@ -75,6 +73,8 @@ fn query_and_not_1() {
 }
 #[test]
 fn query_and_not_2() {
+    // volutpat exists in both.
+    // hac exists only in the second
     let q = pq("volutpat -hac");
     let (map, index) = docs();
 
