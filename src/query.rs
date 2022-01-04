@@ -3,7 +3,7 @@ use std::fmt::{self, Debug, Display};
 
 use crate::index::Occurence;
 use crate::index::{self, ConditionalOccurrence};
-use crate::set;
+use crate::{set, proximity};
 pub use parse::{parse, Options as ParseOptions};
 
 #[derive(Debug, Clone)]
@@ -99,8 +99,8 @@ impl Part {
         ModI: Iterator<Item = T> + 'a,
         AndMI: Iterator<Item = T> + 'a,
     >(
-        &self,
-        iter: &mut (impl FnMut(&str) -> Option<I> + 'a),
+        &'a self,
+        iter: &mut (impl FnMut(&'a str) -> Option<I> + 'a),
         and_not_modify: &impl Fn(
             Box<dyn Iterator<Item = T> + 'a>,
             Box<dyn Iterator<Item = T> + 'a>,
@@ -177,11 +177,11 @@ impl Query {
     /// This is due to a limitation of the index architecture used by this library,
     /// and almost all other search engines.
     pub fn documents<'a>(
-        &self,
+        &'a self,
         provider: &'a impl index::Provider<'a>,
     ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
         self.root.as_doc_iter(
-            &mut |s| provider.documents_with_word(s),
+            &mut |s| Some(proximity::proximate_word_docs(s, provider).map(|(id, _)| id)),
             &|i, _| i,
             &set::intersect,
         )
@@ -191,11 +191,13 @@ impl Query {
     /// Same as [`Self::documents`], but with AND NOT queries, it actually rejects all documents
     /// which has any `b`.
     ///
+    /// This also does not get docs for proximate words.
+    ///
     /// # Errors
     ///
     /// See [`Self::documents`].
     pub fn documents_conservative<'a>(
-        &self,
+        &'a self,
         provider: &'a impl index::Provider<'a>,
     ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
         self.root.as_doc_iter(
@@ -216,7 +218,7 @@ impl Query {
     /// documents.
     #[allow(clippy::too_many_lines)]
     pub fn occurences<'a>(
-        &self,
+        &'a self,
         provider: &'a impl index::OccurenceProvider<'a>,
     ) -> Result<impl Iterator<Item = Hit> + 'a, IterError> {
         struct OccurenceEq(Hit);

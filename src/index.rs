@@ -9,10 +9,12 @@
 //! `O(n * log n)` is very close to `O(n)`.
 
 use std::cmp;
-use std::collections::{btree_set, BTreeMap, BTreeSet, HashMap};
+use std::collections::{btree_map, btree_set, BTreeMap, BTreeSet, HashMap};
 use std::fmt::{Debug, Display};
-use std::iter::Copied;
+use std::iter::{Copied, Map};
 use std::sync::{Arc, Mutex};
+
+use crate::proximity;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
 pub struct Id(u64);
@@ -78,7 +80,7 @@ impl<T: AsRef<str>> From<T> for Alphanumeral<T> {
     }
 }
 impl<T: AsRef<str>> Alphanumeral<T> {
-    pub fn chars(&self) -> impl Iterator<Item = char> + '_ {
+    pub fn chars(&self) -> impl Iterator<Item = char> + Clone + '_ {
         self.0
             .as_ref()
             .chars()
@@ -120,7 +122,7 @@ impl<T: AsRef<str>> Display for Alphanumeral<T> {
 
 /// Needed to index [custom struct](Alphanumeral) in maps.
 /// We have to have the same type, so this acts as both the borrowed and owned.
-struct StrPtr {
+pub struct StrPtr {
     s: *const str,
     drop: bool,
 }
@@ -136,7 +138,10 @@ impl StrPtr {
     /// # Safety
     ///
     /// `s` must be valid for the lifetime of this object.
-    unsafe fn sref(s: &str) -> Self {
+    unsafe fn sref<'a>(s: &'a str) -> Self
+    where
+        Self: 'a,
+    {
         // Since `drop` is false, we don't care about ownership.
         Self::new(s, false)
     }
@@ -176,6 +181,8 @@ impl Display for StrPtr {
         std::fmt::Display::fmt(&self.as_ref(), f)
     }
 }
+
+pub(crate) type AlphanumRef = Alphanumeral<StrPtr>;
 
 #[derive(Debug)]
 #[must_use]
@@ -283,11 +290,19 @@ impl WordOccurrence {
 /// Allows to insert words and remove occurrences from documents.
 pub trait Provider<'a> {
     type DocumentIter: Iterator<Item = Id> + ExactSizeIterator + 'a;
+    type WordIter: Iterator<Item = &'a AlphanumRef> + 'a;
+    type WordFilteredIter: Iterator<Item = &'a AlphanumRef> + 'a;
 
     fn insert_word(&mut self, word: impl AsRef<str>, document: Id);
     fn remove_document(&mut self, document: Id);
     fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool;
     fn documents_with_word(&'a self, word: impl AsRef<str>) -> Option<Self::DocumentIter>;
+
+    fn word_count_upper_limit(&self) -> usize;
+    fn words(&'a self) -> Self::WordIter;
+    fn words_starting_with(&'a self, c: char) -> Self::WordFilteredIter;
+
+    fn word_proximity_threshold(&self) -> f64;
 
     /// Only adds words which are alphanumeric.
     fn digest_document(&mut self, id: Id, content: &str) {
@@ -295,10 +310,8 @@ pub trait Provider<'a> {
             if word.is_empty() {
                 continue;
             }
-            println!("Adding {}", word);
             // Word must be alphanumeric to be added.
             if word.contains(|c: char| !c.is_alphanumeric()) {
-                println!("Failed");
                 continue;
             }
 
@@ -308,7 +321,7 @@ pub trait Provider<'a> {
 }
 pub trait OccurenceProvider<'a> {
     type Iter: Iterator<Item = Occurence> + 'a;
-    fn occurrences_of_word(&'a self, word: &str) -> Option<Self::Iter>;
+    fn occurrences_of_word(&'a self, word: &'a str) -> Option<Self::Iter>;
 }
 
 #[derive(Debug)]
@@ -346,12 +359,18 @@ impl Default for SimpleDocRef {
 #[derive(Debug)]
 #[must_use]
 pub struct Simple {
-    words: BTreeMap<Alphanumeral<StrPtr>, SimpleDocRef>,
+    words: BTreeMap<AlphanumRef, SimpleDocRef>,
+    proximity_threshold: f64,
 }
 impl Simple {
-    pub fn new() -> Self {
+    /// `proximity_threshold` is the threshold where alike words are also accepted.
+    /// It uses the range [0..1], where values nearer 0 allow more words.
+    ///
+    /// The default is `0.9`.
+    pub fn new(proximity_threshold: f64) -> Self {
         Self {
             words: BTreeMap::new(),
+            proximity_threshold,
         }
     }
     /// Merges `other` with `self`.
@@ -367,13 +386,17 @@ impl Simple {
         }
     }
 }
+/// [`Self::new`] with `proximity_threshold` set to `0.9`.
 impl Default for Simple {
     fn default() -> Self {
-        Self::new()
+        Self::new(0.9)
     }
 }
+type FirstTy<'a> = fn((&'a AlphanumRef, &'a SimpleDocRef)) -> &'a AlphanumRef;
 impl<'a> Provider<'a> for Simple {
     type DocumentIter = Copied<btree_set::Iter<'a, Id>>;
+    type WordIter = btree_map::Keys<'a, AlphanumRef, SimpleDocRef>;
+    type WordFilteredIter = Map<btree_map::Range<'a, AlphanumRef, SimpleDocRef>, FirstTy<'a>>;
 
     /// O(log n log n)
     fn insert_word(&mut self, word: impl AsRef<str>, document: Id) {
@@ -381,14 +404,11 @@ impl<'a> Provider<'a> for Simple {
         // SAFETY: We only use `StrPtr` in the current scope.
         let ptr = unsafe { StrPtr::sref(word) };
         if let Some(doc_ref) = self.words.get_mut(&Alphanumeral::new(ptr)) {
-            println!("Update '{}' {:?}", Alphanumeral::new(word), doc_ref);
             doc_ref.insert(document);
-            println!("Updated '{}' {:?}", word, doc_ref);
         } else {
             let mut doc_ref = SimpleDocRef::new();
             doc_ref.insert(document);
             let word = Alphanumeral::new(word).chars().collect::<String>();
-            println!("New word {} {:?}", word, doc_ref);
             let ptr = StrPtr::owned(word);
             self.words.insert(Alphanumeral::new(ptr), doc_ref);
         }
@@ -420,6 +440,28 @@ impl<'a> Provider<'a> for Simple {
             .get(&Alphanumeral::new(ptr))
             .map(SimpleDocRef::documents)
     }
+
+    fn word_count_upper_limit(&self) -> usize {
+        self.words.len()
+    }
+    fn words(&'a self) -> Self::WordIter {
+        self.words.keys()
+    }
+    fn words_starting_with(&'a self, c: char) -> Self::WordFilteredIter {
+        let s1 = String::from(c);
+        let ptr1 = StrPtr::owned(s1);
+        let mut s2 = String::from(c);
+        s2.push(char::MAX);
+        let ptr2 = StrPtr::owned(s2);
+
+        self.words
+            .range(Alphanumeral::new(ptr1)..Alphanumeral::new(ptr2))
+            .map(|(k, _v)| k)
+    }
+
+    fn word_proximity_threshold(&self) -> f64 {
+        self.proximity_threshold
+    }
 }
 fn word_pattern(c: char) -> bool {
     c.is_ascii_whitespace() || c.is_ascii_punctuation()
@@ -427,10 +469,7 @@ fn word_pattern(c: char) -> bool {
 #[derive(Debug)]
 pub struct SimpleOccurrencesIter<'a, I> {
     iter: I,
-    // `TODO`: Optimize
-    // Reason for allocation:
-    //  `OccurenceProvider::occurrences_of_word` requires the `&str` to not have the `'a` lifetime.
-    word: String,
+    words: BTreeSet<&'a AlphanumRef>,
 
     document_contents: &'a HashMap<Id, Arc<String>>,
 
@@ -444,13 +483,13 @@ pub struct SimpleOccurrencesIter<'a, I> {
 impl<'a, I: Iterator<Item = Id>> SimpleOccurrencesIter<'a, I> {
     fn new(
         iter: I,
-        word: String,
+        words: BTreeSet<&'a AlphanumRef>,
         document_contents: &'a HashMap<Id, Arc<String>>,
         missing: &'a Mutex<Vec<Id>>,
     ) -> Self {
         Self {
             iter,
-            word,
+            words,
             document_contents,
             current_doc: None,
             current_pos: 0,
@@ -466,11 +505,15 @@ impl<'a, I: Iterator<Item = Id>> Iterator for SimpleOccurrencesIter<'a, I> {
             for doc in doc_iter {
                 let start = self.current_pos;
                 self.current_pos += doc.len() + 1;
+                // SAFETY: We only use it in this scope.
+                let doc_ptr = unsafe { StrPtr::sref(doc) };
+                let doc_ptr = Alphanumeral::new(doc_ptr);
+
                 let doc = Alphanumeral::new(doc);
                 if doc.chars().next().is_none() {
                     continue;
                 }
-                if doc == self.word {
+                if self.words.contains(&doc_ptr) {
                     self.current_doc_matched = true;
                     return Some(Occurence::new(start, *doc_id));
                 }
@@ -529,13 +572,14 @@ impl<'a> SimpleOccurences<'a> {
 }
 impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
     type Iter = SimpleOccurrencesIter<'a, Copied<btree_set::Iter<'a, Id>>>;
-    fn occurrences_of_word(&'a self, word: &str) -> Option<Self::Iter> {
+    fn occurrences_of_word(&'a self, word: &'a str) -> Option<Self::Iter> {
         // SAFETY: We only use `StrPtr` in the current scope.
         let ptr = unsafe { StrPtr::sref(word) };
         let doc_ref = self.index.words.get(&Alphanumeral::new(ptr))?;
+        let words = proximity::proximate_words(word, self.index).collect();
         Some(SimpleOccurrencesIter::new(
             doc_ref.docs.iter().copied(),
-            word.into(),
+            words,
             &self.document_contents,
             &self.missing,
         ))
@@ -576,7 +620,7 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
     #[test]
     fn occurences() {
         let mut doc_map = DocumentMap::new();
-        let mut index = Simple::new();
+        let mut index = Simple::default();
         doc_map.insert("doc1", doc1(), &mut index);
         doc_map.insert("doc3", doc2(), &mut index);
 

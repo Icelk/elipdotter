@@ -4,6 +4,7 @@
     missing_debug_implementations,
     // missing_docs
 )]
-pub mod query;
 pub mod index;
+pub mod query;
 pub mod set;
+pub mod proximity;

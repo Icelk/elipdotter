@@ -1,16 +1,8 @@
 use index::{DocumentMap, Simple, SimpleOccurences};
-use query::{Part, Query};
+use query::Query;
 use search::*;
 
 /// Parses `s` with [`ParseOptions::default`].
-fn pp(s: &str) -> Part {
-    match s.parse() {
-        Ok(p) => p,
-        Err(err) => {
-            panic!("Failed to parse '{}', {:?}", s, err);
-        }
-    }
-}
 fn pq(s: &str) -> Query {
     match s.parse() {
         Ok(p) => p,
@@ -34,7 +26,7 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
 }
 fn docs() -> (DocumentMap, Simple) {
     let mut map = DocumentMap::new();
-    let mut index = Simple::new();
+    let mut index = Simple::default();
     map.insert("doc 1", doc1(), &mut index);
     map.insert("doc_2", doc2(), &mut index);
     (map, index)
