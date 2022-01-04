@@ -208,15 +208,16 @@ impl Query {
                     occurrence: occ,
                     rating: 0.0,
                     conditional_occurrences: BTreeSet::new(),
+                    closest_not: None,
                 })
             }
             fn inner(self) -> Hit {
                 self.0
             }
             #[must_use]
-            fn closest(&self, other: &Self) -> usize {
+            fn closest(&self, other: &Self) -> (usize, ConditionalOccurrence) {
                 use std::cmp::Ordering;
-                let mut closest = usize::MAX;
+                let mut closest = (usize::MAX, ConditionalOccurrence::new(0));
                 let mut a_iter = self.0.conditional_occurrences().map(|c| c.start());
                 // If `conditional_occurrences` has len 0, use only start.
                 // Else, it'll have >=2 occurences, since the `.start()` is also taken as part of
@@ -227,7 +228,10 @@ impl Query {
                 let mut one_completed = false;
                 loop {
                     let dist = if a > b { a - b } else { b - a };
-                    closest = std::cmp::min(dist, closest);
+                    closest =
+                        std::cmp::min_by((dist, ConditionalOccurrence::new(b)), closest, |a, b| {
+                            a.0.cmp(&b.0)
+                        });
                     match a.cmp(&b) {
                         Ordering::Less => {
                             if let Some(next) = a_iter.next() {
@@ -241,7 +245,7 @@ impl Query {
                         // The words are at the same place!
                         //
                         // This is technically not reachable, but the following codes makes sense.
-                        Ordering::Equal => return 0,
+                        Ordering::Equal => return (0, ConditionalOccurrence::new(b)),
                         Ordering::Greater => {
                             if let Some(next) = b_iter.next() {
                                 b = next;
@@ -305,8 +309,9 @@ impl Query {
                             let closest = and.closest(&not);
                             // Don't really care about precision.
                             #[allow(clippy::cast_precision_loss)]
-                            let rating_decrease = 1.0 / (0.01 * closest as f32 + 0.1);
+                            let rating_decrease = 1.0 / (0.005 * closest.0 as f32 + 0.1);
                             and.0.rating -= rating_decrease;
+                            and.0.closest_not = Some(closest.1);
                             Some(and)
                         }
                     })
@@ -332,6 +337,8 @@ pub struct Hit {
 
     rating: f32,
     conditional_occurrences: BTreeSet<ConditionalOccurrence>,
+
+    closest_not: Option<ConditionalOccurrence>,
 }
 impl Hit {
     /// Get a reference to the hit's document id.
