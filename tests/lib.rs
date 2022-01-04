@@ -80,16 +80,20 @@ fn query_and_not_2() {
     let mut docs = q.documents(&index).unwrap();
 
     assert_eq!(docs.next(), Some(map.get_id("doc 1").unwrap()));
-    // assert_eq!(docs.next(), None);
+    // It does contain `hac`, but maybe they're far apart?
+    assert_eq!(docs.next(), Some(map.get_id("doc_2").unwrap()));
 
     let occ_provider = augment_simple(&index, &map);
     let mut occurences = q.occurences(&occ_provider).unwrap();
     let next = occurences.next().unwrap();
     assert_eq!(next.id(), map.get_id("doc 1").unwrap());
     assert_eq!(next.start(), 399);
+    assert!(next.rating() <= 1.0);
+    assert!(next.rating() >= -1.0);
     let next = occurences.next().unwrap();
     assert_eq!(next.id(), map.get_id("doc_2").unwrap());
     assert_eq!(next.start(), 348);
+    assert!(next.rating() < -0.0);
     assert_eq!(occurences.next(), None);
 }
 #[test]
@@ -101,15 +105,19 @@ fn query_and_not_3() {
     let mut docs = q.documents(&index).unwrap();
 
     assert_eq!(docs.next(), Some(map.get_id("doc 1").unwrap()));
-    // assert_eq!(docs.next(), None);
+    // It does contain `hac`, but maybe they're far apart?
+    assert_eq!(docs.next(), Some(map.get_id("doc_2").unwrap()));
 
     let occ_provider = augment_simple(&index, &map);
     let mut occurences = q.occurences(&occ_provider).unwrap();
     let next = occurences.next().unwrap();
     assert_eq!(next.id(), map.get_id("doc 1").unwrap());
     assert_eq!(next.start(), 399);
+    assert!(next.rating() <= 1.0);
+    assert!(next.rating() >= -1.0);
     let next = occurences.next().unwrap();
     assert_eq!(next.id(), map.get_id("doc_2").unwrap());
     assert_eq!(next.start(), 348);
+    assert!(next.rating() < -0.0);
     assert_eq!(occurences.next(), None);
 }
