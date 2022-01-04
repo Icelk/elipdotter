@@ -186,6 +186,24 @@ impl Query {
             &set::intersect,
         )
     }
+    /// DO NOT USE THIS TO GET THE DOCS TO PASS TO [`Self::occurences`].
+    ///
+    /// Same as [`Self::documents`], but with AND NOT queries, it actually rejects all documents
+    /// which has any `b`.
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::documents`].
+    pub fn documents_conservative<'a>(
+        &self,
+        provider: &'a impl index::Provider<'a>,
+    ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
+        self.root.as_doc_iter(
+            &mut |s| provider.documents_with_word(s),
+            &set::difference,
+            &set::intersect,
+        )
+    }
     /// # Errors
     ///
     /// See [`Self::documents`].
