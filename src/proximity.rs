@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::index::{AlphanumRef, Id, Provider};
 
 #[derive(Debug)]
@@ -27,18 +29,12 @@ impl<'a, I: Iterator<Item = char> + Clone> IntoIterator for &'a IntoIterClone<I>
 }
 
 #[derive(Debug)]
-pub(crate) struct ProximateWordIter<
-    'a,
-    I1: Iterator<Item = &'a AlphanumRef>,
-    I2: Iterator<Item = &'a AlphanumRef>,
-> {
+pub struct ProximateWordIter<'a, P: Provider<'a>> {
     word: &'a str,
-    iter: PIter<'a, I1, I2>,
+    iter: PIter<'a, P::WordIter, P::WordFilteredIter>,
     threshold: f64,
 }
-impl<'a, I1: Iterator<Item = &'a AlphanumRef>, I2: Iterator<Item = &'a AlphanumRef>> Iterator
-    for ProximateWordIter<'a, I1, I2>
-{
+impl<'a, P: Provider<'a>> Iterator for ProximateWordIter<'a, P> {
     type Item = &'a AlphanumRef;
     fn next(&mut self) -> Option<Self::Item> {
         for other_word in &mut self.iter {
@@ -59,14 +55,18 @@ impl<'a, I1: Iterator<Item = &'a AlphanumRef>, I2: Iterator<Item = &'a AlphanumR
 /// If `threshold` is closer to 0, more results are accepted.
 /// It has a range of [0..1].
 /// E.g. `0.95` means `word` is probably the only word to match.
-pub(crate) fn proximate_words<'a, P: Provider<'a>>(
+///
+/// `word_count_limit` is the limit where only words starting with the first [`char`] of `word`
+/// will be checked for proximity.
+pub fn proximate_words<'a, P: Provider<'a>>(
     word: &'a str,
     provider: &'a P,
-) -> ProximateWordIter<'a, P::WordIter, P::WordFilteredIter> {
+    word_count_limit: usize,
+) -> ProximateWordIter<'a, P> {
     let threshold = provider.word_proximity_threshold();
     let word_count = provider.word_count_upper_limit();
     if let Some(c) = word.chars().next() {
-        if word_count > 10_000 {
+        if word_count > word_count_limit {
             return ProximateWordIter {
                 word,
                 iter: PIter::WordFilteredIter(provider.words_starting_with(c)),
@@ -81,8 +81,8 @@ pub(crate) fn proximate_words<'a, P: Provider<'a>>(
     }
 }
 
-pub(crate) struct ProximateDocIter<'a, P: Provider<'a>> {
-    word_iter: ProximateWordIter<'a, P::WordIter, P::WordFilteredIter>,
+pub struct ProximateDocIter<'a, P: Provider<'a>> {
+    word_iter: ProximateWordIter<'a, P>,
     provider: &'a P,
     current: Option<(&'a AlphanumRef, P::DocumentIter)>,
     // Why BTreeSet? Well, faster on small lists, as hashing takes a long time
@@ -92,6 +92,20 @@ pub(crate) struct ProximateDocIter<'a, P: Provider<'a>> {
     // do this? Downcasting? Wouldn't that just be as hurting to performance?
     // Refactoring?
     // accepted_words: BTreeSet<&'a AlphanumRef>,
+}
+impl<'a, P: Provider<'a> + Debug> Debug for ProximateDocIter<'a, P>
+where
+    P::DocumentIter: Debug,
+    P::WordIter: Debug,
+    P::WordFilteredIter: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProximateDocIter")
+            .field("word_iter", &self.word_iter)
+            .field("provider", &self.provider)
+            .field("current", &self.current)
+            .finish()
+    }
 }
 // impl<'a, P: Provider<'a>> ProximateDocIter<'a, P> {
 // pub(crate) fn accepted_words(&self) -> &BTreeSet<&'a AlphanumRef> {
@@ -123,12 +137,15 @@ impl<'a, P: Provider<'a>> Iterator for ProximateDocIter<'a, P> {
         }
     }
 }
-pub(crate) fn proximate_word_docs<'a, P: Provider<'a>>(
+/// `word_count_limit` is the limit where only words starting with the first [`char`] of `word`
+/// will be checked for proximity.
+pub fn proximate_word_docs<'a, P: Provider<'a>>(
     word: &'a str,
     provider: &'a P,
+    word_count_limit: usize,
 ) -> ProximateDocIter<'a, P> {
     ProximateDocIter {
-        word_iter: proximate_words(word, provider),
+        word_iter: proximate_words(word, provider, word_count_limit),
         current: None,
         provider,
         // accepted_words: BTreeSet::new(),

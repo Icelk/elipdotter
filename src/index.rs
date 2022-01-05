@@ -321,7 +321,10 @@ pub trait Provider<'a> {
 }
 pub trait OccurenceProvider<'a> {
     type Iter: Iterator<Item = Occurence> + 'a;
-    fn occurrences_of_word(&'a self, word: &'a str) -> Option<Self::Iter>;
+    ///
+    /// `word_count_limit` is the limit where only words starting with the first [`char`] of `word`
+    /// will be checked for proximity.
+    fn occurrences_of_word(&'a self, word: &'a str, word_count_limit: usize) -> Option<Self::Iter>;
 }
 
 #[derive(Debug)]
@@ -474,46 +477,46 @@ pub struct SimpleOccurrencesIter<'a, I> {
     document_contents: &'a HashMap<Id, Arc<String>>,
 
     #[allow(clippy::type_complexity)] // That's not complex.
-    current_doc: Option<(std::str::Split<'a, fn(char) -> bool>, Id)>,
+    current: Option<(std::str::Split<'a, fn(char) -> bool>, Id, &'a AlphanumRef)>,
     current_pos: usize,
     current_doc_matched: bool,
 
-    missing: &'a Mutex<Vec<Id>>,
+    missing: &'a Mutex<Vec<(Id, &'a AlphanumRef)>>,
 }
-impl<'a, I: Iterator<Item = Id>> SimpleOccurrencesIter<'a, I> {
+impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef)>> SimpleOccurrencesIter<'a, I> {
     fn new(
         iter: I,
         words: BTreeSet<&'a AlphanumRef>,
         document_contents: &'a HashMap<Id, Arc<String>>,
-        missing: &'a Mutex<Vec<Id>>,
+        missing: &'a Mutex<Vec<(Id, &'a AlphanumRef)>>,
     ) -> Self {
         Self {
             iter,
             words,
             document_contents,
-            current_doc: None,
+            current: None,
             current_pos: 0,
             current_doc_matched: false,
             missing,
         }
     }
 }
-impl<'a, I: Iterator<Item = Id>> Iterator for SimpleOccurrencesIter<'a, I> {
+impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef)>> Iterator for SimpleOccurrencesIter<'a, I> {
     type Item = Occurence;
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some((doc_iter, doc_id)) = &mut self.current_doc {
-            for doc in doc_iter {
+        if let Some((words_in_doc, doc_id, searching_word)) = &mut self.current {
+            for word_in_doc in words_in_doc {
                 let start = self.current_pos;
-                self.current_pos += doc.len() + 1;
+                self.current_pos += word_in_doc.len() + 1;
                 // SAFETY: We only use it in this scope.
-                let doc_ptr = unsafe { StrPtr::sref(doc) };
-                let doc_ptr = Alphanumeral::new(doc_ptr);
+                let word_ptr = unsafe { StrPtr::sref(word_in_doc) };
+                let word_ptr = Alphanumeral::new(word_ptr);
 
-                let doc = Alphanumeral::new(doc);
-                if doc.chars().next().is_none() {
+                let word = Alphanumeral::new(word_in_doc);
+                if word.chars().next().is_none() {
                     continue;
                 }
-                if self.words.contains(&doc_ptr) {
+                if self.words.contains(&word_ptr) {
                     self.current_doc_matched = true;
                     return Some(Occurence::new(start, *doc_id));
                 }
@@ -524,17 +527,17 @@ impl<'a, I: Iterator<Item = Id>> Iterator for SimpleOccurrencesIter<'a, I> {
                     "lock is poisoned, other thread panicked.\
                     This should anyway not be accessed from multiple threads simultaneously",
                 );
-                missing.push(*doc_id);
+                missing.push((*doc_id, searching_word));
             }
         }
 
-        let next_doc = self.iter.next()?;
+        let (next_doc, word) = self.iter.next()?;
         let contents = if let Some(c) = self.document_contents.get(&next_doc) {
             c
         } else {
             failed_to_find_document_in_provided_documents()
         };
-        self.current_doc = Some((contents.split(word_pattern), next_doc));
+        self.current = Some((contents.split(word_pattern), next_doc, word));
         self.current_pos = 0;
         self.next()
     }
@@ -551,8 +554,11 @@ pub struct SimpleOccurences<'a> {
     index: &'a Simple,
     document_contents: HashMap<Id, Arc<String>>,
 
-    missing: Mutex<Vec<Id>>,
+    missing: Mutex<Vec<(Id, &'a AlphanumRef)>>,
 }
+/// Once this is used, call [`Simple::apply_missing`] to remove the missing entries found during
+/// the search.
+///
 /// # Panics
 ///
 /// Using the [`OccurenceProvider::occurrences_of_word`] may panic, if not all documents returned
@@ -571,14 +577,13 @@ impl<'a> SimpleOccurences<'a> {
     }
 }
 impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
-    type Iter = SimpleOccurrencesIter<'a, Copied<btree_set::Iter<'a, Id>>>;
-    fn occurrences_of_word(&'a self, word: &'a str) -> Option<Self::Iter> {
-        // SAFETY: We only use `StrPtr` in the current scope.
-        let ptr = unsafe { StrPtr::sref(word) };
-        let doc_ref = self.index.words.get(&Alphanumeral::new(ptr))?;
-        let words = proximity::proximate_words(word, self.index).collect();
+    type Iter = SimpleOccurrencesIter<'a, crate::proximity::ProximateDocIter<'a, Simple>>;
+
+    fn occurrences_of_word(&'a self, word: &'a str, word_count_limit: usize) -> Option<Self::Iter> {
+        // `TODO`: Optimize, don't use two proximate iters.
+        let words = proximity::proximate_words(word, self.index, word_count_limit).collect();
         Some(SimpleOccurrencesIter::new(
-            doc_ref.docs.iter().copied(),
+            crate::proximity::proximate_word_docs(word, self.index, word_count_limit),
             words,
             &self.document_contents,
             &self.missing,
@@ -633,7 +638,7 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
         simple_provider.add_document(doc_map.get_id("doc1").unwrap(), doc1().to_string().into());
         simple_provider.add_document(doc_map.get_id("doc3").unwrap(), doc2().to_string().into());
 
-        let mut occurrences = simple_provider.occurrences_of_word("lorem").unwrap();
+        let mut occurrences = simple_provider.occurrences_of_word("lorem", 5000).unwrap();
         // Same problem here as above
         assert_eq!(
             occurrences.next(),

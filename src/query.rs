@@ -181,7 +181,7 @@ impl Query {
         provider: &'a impl index::Provider<'a>,
     ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
         self.root.as_doc_iter(
-            &mut |s| Some(proximity::proximate_word_docs(s, provider).map(|(id, _)| id)),
+            &mut |s| Some(proximity::proximate_word_docs(s, provider, 5_000).map(|(id, _)| id)),
             &|i, _| i,
             &set::intersect,
         )
@@ -301,7 +301,7 @@ impl Query {
             .as_doc_iter(
                 &mut |s| {
                     provider
-                        .occurrences_of_word(s)
+                        .occurrences_of_word(s, 5_000)
                         .map(|iter| iter.map(OccurenceEq::new))
                 },
                 &|and, not| {
