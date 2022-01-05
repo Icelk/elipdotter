@@ -1,4 +1,4 @@
--   [x] Occurences of AND statements, which occurence is shown? Have a list?
+-   [x] Occurences of AND statements, which occurrence is shown? Have a list?
         Do this using UnsafeCell to get ref to vec. If eq two in Query::occurence, write to it.
         Have static "conditional_points" which store these.
 -   [x] rate result, including proximity (do while running or ↑?) (reversed for NOT), how close ↓ was, etc.
@@ -11,3 +11,5 @@
 -   [x] Have AND NOT return results when they are in the same doc, but with lower rating.
         This is achieved through not making the difference, but filter_map the value. Then, modify it's rating to if they are both in, and remove those in `b`.
         Do this through <https://docs.rs/iter-set/2.0.2/iter_set/fn.classify.html>
+-   [ ] Remove from index when missing occurrences were found.
+-   [ ] Where to input `word_count_limit`?
