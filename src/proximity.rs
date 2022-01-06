@@ -55,18 +55,13 @@ impl<'a, P: Provider<'a>> Iterator for ProximateWordIter<'a, P> {
 /// If `threshold` is closer to 0, more results are accepted.
 /// It has a range of [0..1].
 /// E.g. `0.95` means `word` is probably the only word to match.
-///
-/// `word_count_limit` is the limit where only words starting with the first [`char`] of `word`
-/// will be checked for proximity.
 pub fn proximate_words<'a, P: Provider<'a>>(
     word: &'a str,
     provider: &'a P,
-    word_count_limit: usize,
 ) -> ProximateWordIter<'a, P> {
     let threshold = provider.word_proximity_threshold();
-    let word_count = provider.word_count_upper_limit();
     if let Some(c) = word.chars().next() {
-        if word_count > word_count_limit {
+        if provider.word_count_upper_limit() > provider.word_count_limit() {
             return ProximateWordIter {
                 word,
                 iter: PIter::WordFilteredIter(provider.words_starting_with(c)),
@@ -142,10 +137,9 @@ impl<'a, P: Provider<'a>> Iterator for ProximateDocIter<'a, P> {
 pub fn proximate_word_docs<'a, P: Provider<'a>>(
     word: &'a str,
     provider: &'a P,
-    word_count_limit: usize,
 ) -> ProximateDocIter<'a, P> {
     ProximateDocIter {
-        word_iter: proximate_words(word, provider, word_count_limit),
+        word_iter: proximate_words(word, provider),
         current: None,
         provider,
         // accepted_words: BTreeSet::new(),

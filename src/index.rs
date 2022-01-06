@@ -312,6 +312,9 @@ pub trait Provider<'a> {
     fn documents_with_word(&'a self, word: impl AsRef<str>) -> Option<Self::DocumentIter>;
 
     fn word_count_upper_limit(&self) -> usize;
+    /// The limit of [`Self::word_count_upper_limit`] where [`Self::words_starting_with`] is used
+    /// instead of [`Self::words`].
+    fn word_count_limit(&self) -> usize;
     fn words(&'a self) -> Self::WordIter;
     fn words_starting_with(&'a self, c: char) -> Self::WordFilteredIter;
 
@@ -337,7 +340,7 @@ pub trait OccurenceProvider<'a> {
     ///
     /// `word_count_limit` is the limit where only words starting with the first [`char`] of `word`
     /// will be checked for proximity.
-    fn occurrences_of_word(&'a self, word: &'a str, word_count_limit: usize) -> Option<Self::Iter>;
+    fn occurrences_of_word(&'a self, word: &'a str) -> Option<Self::Iter>;
 }
 
 #[derive(Debug)]
@@ -377,16 +380,21 @@ impl Default for SimpleDocRef {
 pub struct Simple {
     words: BTreeMap<AlphanumRef, SimpleDocRef>,
     proximity_threshold: f64,
+    word_count_limit: usize,
 }
 impl Simple {
     /// `proximity_threshold` is the threshold where alike words are also accepted.
     /// It uses the range [0..1], where values nearer 0 allow more words.
     ///
     /// The default is `0.9`.
-    pub fn new(proximity_threshold: f64) -> Self {
+    ///
+    /// `word_count_limit` is the number of words in this index where only words with the first
+    /// character is used for approximate matching.
+    pub fn new(proximity_threshold: f64, word_count_limit: usize) -> Self {
         Self {
             words: BTreeMap::new(),
             proximity_threshold,
+            word_count_limit
         }
     }
     /// Merges `other` with `self`.
@@ -405,7 +413,7 @@ impl Simple {
 /// [`Self::new`] with `proximity_threshold` set to `0.9`.
 impl Default for Simple {
     fn default() -> Self {
-        Self::new(0.9)
+        Self::new(0.9, 5000)
     }
 }
 type FirstTy<'a> = fn((&'a AlphanumRef, &'a SimpleDocRef)) -> &'a AlphanumRef;
@@ -459,6 +467,9 @@ impl<'a> Provider<'a> for Simple {
 
     fn word_count_upper_limit(&self) -> usize {
         self.words.len()
+    }
+    fn word_count_limit(&self) -> usize {
+        self.word_count_limit
     }
     fn words(&'a self) -> Self::WordIter {
         self.words.keys()
@@ -606,11 +617,11 @@ impl<'a> SimpleOccurences<'a> {
 impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
     type Iter = SimpleOccurrencesIter<'a, crate::proximity::ProximateDocIter<'a, Simple>>;
 
-    fn occurrences_of_word(&'a self, word: &'a str, word_count_limit: usize) -> Option<Self::Iter> {
+    fn occurrences_of_word(&'a self, word: &'a str) -> Option<Self::Iter> {
         // `TODO`: Optimize, don't use two proximate iters.
-        let words = proximity::proximate_words(word, self.index, word_count_limit).collect();
+        let words = proximity::proximate_words(word, self.index).collect();
         Some(SimpleOccurrencesIter::new(
-            crate::proximity::proximate_word_docs(word, self.index, word_count_limit),
+            crate::proximity::proximate_word_docs(word, self.index),
             words,
             &self.document_contents,
             &self.missing,
@@ -678,7 +689,7 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
         simple_provider.add_document(doc_map.get_id("doc1").unwrap(), doc1().to_string().into());
         simple_provider.add_document(doc_map.get_id("doc3").unwrap(), doc2().to_string().into());
 
-        let mut occurrences = simple_provider.occurrences_of_word("lorem", 5000).unwrap();
+        let mut occurrences = simple_provider.occurrences_of_word("lorem").unwrap();
         // Same problem here as above
         assert_eq!(
             occurrences.next(),
