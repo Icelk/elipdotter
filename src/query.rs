@@ -333,7 +333,12 @@ impl Query {
                     return Some(next);
                 }
 
-                let dist = peeked.0.start() - next.0.start();
+                // `TODO`: Similar words won't get merged - they come sequentially.
+                let dist = if peeked.0.start() < next.0.start() {
+                    next.0.start() - peeked.0.start()
+                } else {
+                    peeked.0.start() - next.0.start()
+                };
                 if dist > self.distance_threshold {
                     return Some(next);
                 }
