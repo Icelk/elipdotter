@@ -388,6 +388,17 @@ impl Simple {
             }
         }
     }
+
+    /// Removes the missing references.
+    #[allow(clippy::missing_panics_doc)]
+    pub fn apply_missing(&mut self, occurrence: &SimpleOccurences) {
+        let missing_list = occurrence.missing.lock().unwrap();
+        for (id, word) in &*missing_list {
+            if let Some(doc_ref) = self.words.get_mut(word) {
+                doc_ref.remove(*id);
+            }
+        }
+    }
 }
 /// [`Self::new`] with `proximity_threshold` set to `0.9`.
 impl Default for Simple {

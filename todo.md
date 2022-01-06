@@ -11,6 +11,6 @@
 -   [x] Have AND NOT return results when they are in the same doc, but with lower rating.
         This is achieved through not making the difference, but filter_map the value. Then, modify it's rating to if they are both in, and remove those in `b`.
         Do this through <https://docs.rs/iter-set/2.0.2/iter_set/fn.classify.html>
--   [ ] Remove from index when missing occurrences were found.
+-   [x] Remove from index when missing occurrences were found.
 -   [ ] Where to input `word_count_limit`?
 -   [x] Make hit start the closest with others - the one which heightens the rating.
