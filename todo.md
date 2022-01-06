@@ -13,3 +13,4 @@
         Do this through <https://docs.rs/iter-set/2.0.2/iter_set/fn.classify.html>
 -   [ ] Remove from index when missing occurrences were found.
 -   [ ] Where to input `word_count_limit`?
+-   [x] Make hit start the closest with others - the one which heightens the rating.

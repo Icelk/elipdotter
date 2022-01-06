@@ -1,9 +1,10 @@
 use std::collections::BTreeSet;
 use std::fmt::{self, Debug, Display};
+use std::iter::Peekable;
 
 use crate::index::Occurence;
 use crate::index::{self, ConditionalOccurrence};
-use crate::{set, proximity};
+use crate::{proximity, set};
 pub use parse::{parse, Options as ParseOptions};
 
 #[derive(Debug, Clone)]
@@ -297,6 +298,42 @@ impl Query {
             }
         }
 
+        struct MergeProximate<I>
+        where
+            I: Iterator<Item = OccurenceEq>,
+        {
+            iter: Peekable<I>,
+        }
+        impl<I: Iterator<Item = OccurenceEq>> MergeProximate<I> {
+            fn new(iter: I) -> Self {
+                Self {
+                    iter: iter.peekable(),
+                }
+            }
+        }
+        impl<I: Iterator<Item = OccurenceEq>> Iterator for MergeProximate<I> {
+            type Item = OccurenceEq;
+            fn next(&mut self) -> Option<Self::Item> {
+                let mut next = match self.iter.next() {
+                    Some(next) => next,
+                    None => return None,
+                };
+
+                let peeked = match self.iter.peek() {
+                    Some(peeked) => peeked,
+                    None => return Some(next),
+                };
+
+                let dist = peeked.0.start() - next.0.start();
+                if dist > 100 {
+                    return Some(next);
+                }
+                next.0.rating += 2.0;
+                drop(self.next());
+                Some(next)
+            }
+        }
+
         self.root
             .as_doc_iter(
                 &mut |s| {
@@ -337,14 +374,15 @@ impl Query {
                     })
                 },
                 &|left, right| {
-                    iter_set::classify(left, right).filter_map(|inclusion| {
-                        if let iter_set::Inclusion::Both(mut a, b) = inclusion {
-                            a.0.merge(&b.0);
-                            Some(a)
-                        } else {
-                            None
-                        }
-                    })
+                    iter_set::classify(MergeProximate::new(left), MergeProximate::new(right))
+                        .filter_map(|inclusion| {
+                            if let iter_set::Inclusion::Both(mut a, b) = inclusion {
+                                a.0.merge(&b.0);
+                                Some(a)
+                            } else {
+                                None
+                            }
+                        })
                 },
             )
             .map(|iter| iter.map(OccurenceEq::inner))
@@ -373,7 +411,7 @@ impl Hit {
     pub fn start(&self) -> usize {
         self.occurrence.start()
     }
-    /// Get a reference to the hit's occurence.
+    /// Get a reference to the hit's occurrence.
     #[must_use]
     pub fn occurence(&self) -> &Occurence {
         &self.occurrence
