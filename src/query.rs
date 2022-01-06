@@ -207,6 +207,9 @@ impl Query {
             &set::intersect,
         )
     }
+    /// The `distance_threshold` is the bytes between two occurrences to consider the "same", which
+    /// increases [`Hit::rating`].
+    ///
     /// # Errors
     ///
     /// See [`Self::documents`].
@@ -221,6 +224,7 @@ impl Query {
     pub fn occurences<'a>(
         &'a self,
         provider: &'a impl index::OccurenceProvider<'a>,
+        distance_threshold: usize,
     ) -> Result<impl Iterator<Item = Hit> + 'a, IterError> {
         struct OccurenceEq(Hit);
         impl OccurenceEq {
@@ -303,11 +307,13 @@ impl Query {
             I: Iterator<Item = OccurenceEq>,
         {
             iter: Peekable<I>,
+            distance_threshold: usize,
         }
         impl<I: Iterator<Item = OccurenceEq>> MergeProximate<I> {
-            fn new(iter: I) -> Self {
+            fn new(iter: I, distance_threshold: usize) -> Self {
                 Self {
                     iter: iter.peekable(),
+                    distance_threshold,
                 }
             }
         }
@@ -324,14 +330,12 @@ impl Query {
                     None => return Some(next),
                 };
 
-                println!(" {:?} {:?}", peeked.0, next.0);
-
                 if peeked.0.id() != next.0.id() {
                     return Some(next);
                 }
 
                 let dist = peeked.0.start() - next.0.start();
-                if dist > 100 {
+                if dist > self.distance_threshold {
                     return Some(next);
                 }
                 next.0.rating += 2.0;
@@ -380,15 +384,18 @@ impl Query {
                     })
                 },
                 &|left, right| {
-                    iter_set::classify(MergeProximate::new(left), MergeProximate::new(right))
-                        .filter_map(|inclusion| {
-                            if let iter_set::Inclusion::Both(mut a, b) = inclusion {
-                                a.0.merge(&b.0);
-                                Some(a)
-                            } else {
-                                None
-                            }
-                        })
+                    iter_set::classify(
+                        MergeProximate::new(left, distance_threshold),
+                        MergeProximate::new(right, distance_threshold),
+                    )
+                    .filter_map(|inclusion| {
+                        if let iter_set::Inclusion::Both(mut a, b) = inclusion {
+                            a.0.merge(&b.0);
+                            Some(a)
+                        } else {
+                            None
+                        }
+                    })
                 },
             )
             .map(|iter| iter.map(OccurenceEq::inner))

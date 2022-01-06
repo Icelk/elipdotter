@@ -73,6 +73,12 @@ impl<T> Alphanumeral<T> {
     pub fn new(s: T) -> Self {
         Self(s)
     }
+    pub fn owned(&self) -> Alphanumeral<T::Owned>
+    where
+        T: ToOwned + AsRef<str>,
+    {
+        Alphanumeral::new(self.0.to_owned())
+    }
 }
 impl<T: AsRef<str>> From<T> for Alphanumeral<T> {
     fn from(v: T) -> Self {
@@ -179,6 +185,13 @@ impl Debug for StrPtr {
 impl Display for StrPtr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&self.as_ref(), f)
+    }
+}
+impl ToOwned for StrPtr {
+    type Owned = Self;
+    fn to_owned(&self) -> Self::Owned {
+        let s = self.as_ref().to_owned();
+        Self::owned(s)
     }
 }
 
@@ -388,17 +401,6 @@ impl Simple {
             }
         }
     }
-
-    /// Removes the missing references.
-    #[allow(clippy::missing_panics_doc)]
-    pub fn apply_missing(&mut self, occurrence: &SimpleOccurences) {
-        let missing_list = occurrence.missing.lock().unwrap();
-        for (id, word) in &*missing_list {
-            if let Some(doc_ref) = self.words.get_mut(word) {
-                doc_ref.remove(*id);
-            }
-        }
-    }
 }
 /// [`Self::new`] with `proximity_threshold` set to `0.9`.
 impl Default for Simple {
@@ -586,6 +588,20 @@ impl<'a> SimpleOccurences<'a> {
     pub fn add_document(&mut self, id: Id, content: Arc<String>) {
         self.document_contents.insert(id, content);
     }
+
+    /// Removes the missing references.
+    #[allow(clippy::missing_panics_doc)]
+    pub fn missing(&self) -> MissingOccurrences {
+        MissingOccurrences {
+            list: self
+                .missing
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(id, s)| (*id, s.owned()))
+                .collect(),
+        }
+    }
 }
 impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
     type Iter = SimpleOccurrencesIter<'a, crate::proximity::ProximateDocIter<'a, Simple>>;
@@ -599,6 +615,19 @@ impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
             &self.document_contents,
             &self.missing,
         ))
+    }
+}
+#[derive(Debug)]
+pub struct MissingOccurrences {
+    list: Vec<(Id, AlphanumRef)>,
+}
+impl MissingOccurrences {
+    pub fn apply(self, index: &mut Simple) {
+        for (id, word) in self.list {
+            if let Some(doc_ref) = index.words.get_mut(&word) {
+                doc_ref.remove(id);
+            }
+        }
     }
 }
 
