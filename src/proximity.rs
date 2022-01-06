@@ -35,7 +35,7 @@ pub struct ProximateWordIter<'a, P: Provider<'a>> {
     threshold: f64,
 }
 impl<'a, P: Provider<'a>> Iterator for ProximateWordIter<'a, P> {
-    type Item = &'a AlphanumRef;
+    type Item = (&'a AlphanumRef, f32);
     fn next(&mut self) -> Option<Self::Item> {
         for other_word in &mut self.iter {
             let other = other_word.chars();
@@ -46,7 +46,7 @@ impl<'a, P: Provider<'a>> Iterator for ProximateWordIter<'a, P> {
 
             let similarity = strsim::generic_jaro(&other, &own);
             if similarity > self.threshold {
-                return Some(other_word);
+                return Some((other_word, similarity as f32));
             }
         }
         None
@@ -79,7 +79,7 @@ pub fn proximate_words<'a, P: Provider<'a>>(
 pub struct ProximateDocIter<'a, P: Provider<'a>> {
     word_iter: ProximateWordIter<'a, P>,
     provider: &'a P,
-    current: Option<(&'a AlphanumRef, P::DocumentIter)>,
+    current: Option<(&'a AlphanumRef, P::DocumentIter, f32)>,
     // Why BTreeSet? Well, faster on small lists, as hashing takes a long time
     // compared to 10 comparisons (2¹⁰ = 1024 accepted words).
     // `TODO`: Use this.
@@ -111,20 +111,20 @@ where
 // }
 // }
 impl<'a, P: Provider<'a>> Iterator for ProximateDocIter<'a, P> {
-    type Item = (Id, &'a AlphanumRef);
+    type Item = (Id, &'a AlphanumRef, f32);
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some((word, doc_iter)) = &mut self.current {
+        if let Some((word, doc_iter, proximity)) = &mut self.current {
             if let Some(doc) = doc_iter.next() {
-                Some((doc, word))
+                Some((doc, word, *proximity))
             } else {
                 self.current = None;
                 self.next()
             }
-        } else if let Some(next_word) = self.word_iter.next() {
+        } else if let Some((next_word, proximity)) = self.word_iter.next() {
             self.current = self
                 .provider
                 .documents_with_word(next_word)
-                .map(|iter| (next_word, iter));
+                .map(|iter| (next_word, iter, proximity));
             // self.accepted_words.insert(next_word);
             self.next()
         } else {

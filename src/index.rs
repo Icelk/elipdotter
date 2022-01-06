@@ -28,17 +28,23 @@ impl Id {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub struct Occurence {
     start: usize,
     document_id: Id,
+    rating: f32,
 }
 impl Occurence {
     fn new(pos: usize, document_id: Id) -> Self {
         Self {
             start: pos,
             document_id,
+            rating: 0.0,
         }
+    }
+    fn with_rating(mut self, rating: f32) -> Self {
+        self.rating = rating;
+        self
     }
     #[must_use]
     pub fn start(&self) -> usize {
@@ -47,6 +53,13 @@ impl Occurence {
     #[must_use]
     pub fn id(&self) -> Id {
         self.document_id
+    }
+    #[must_use]
+    pub fn rating(&self) -> f32 {
+        self.rating
+    }
+    pub(crate) fn rating_mut(&mut self) -> &mut f32 {
+        &mut self.rating
     }
 }
 /// If [`Occurence`] is part of an AND, these can be associated to tell where the other parts of
@@ -394,7 +407,7 @@ impl Simple {
         Self {
             words: BTreeMap::new(),
             proximity_threshold,
-            word_count_limit
+            word_count_limit,
         }
     }
     /// Merges `other` with `self`.
@@ -501,13 +514,18 @@ pub struct SimpleOccurrencesIter<'a, I> {
     document_contents: &'a HashMap<Id, Arc<String>>,
 
     #[allow(clippy::type_complexity)] // That's not complex.
-    current: Option<(std::str::Split<'a, fn(char) -> bool>, Id, &'a AlphanumRef)>,
+    current: Option<(
+        std::str::Split<'a, fn(char) -> bool>,
+        Id,
+        &'a AlphanumRef,
+        f32,
+    )>,
     current_pos: usize,
     current_doc_matched: bool,
 
     missing: &'a Mutex<Vec<(Id, &'a AlphanumRef)>>,
 }
-impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef)>> SimpleOccurrencesIter<'a, I> {
+impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> SimpleOccurrencesIter<'a, I> {
     fn new(
         iter: I,
         words: BTreeSet<&'a AlphanumRef>,
@@ -525,10 +543,10 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef)>> SimpleOccurrencesIter<'a, I>
         }
     }
 }
-impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef)>> Iterator for SimpleOccurrencesIter<'a, I> {
+impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> Iterator for SimpleOccurrencesIter<'a, I> {
     type Item = Occurence;
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some((words_in_doc, doc_id, searching_word)) = &mut self.current {
+        if let Some((words_in_doc, doc_id, searching_word, proximity)) = &mut self.current {
             for word_in_doc in words_in_doc {
                 let start = self.current_pos;
                 self.current_pos += word_in_doc.len() + 1;
@@ -542,7 +560,10 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef)>> Iterator for SimpleOccurrenc
                 }
                 if self.words.contains(&word_ptr) {
                     self.current_doc_matched = true;
-                    return Some(Occurence::new(start, *doc_id));
+                    let rating = (*proximity - 1.0) * 4.0;
+                    let mut occ = Occurence::new(start, *doc_id);
+                    *occ.rating_mut() += rating;
+                    return Some(occ);
                 }
             }
 
@@ -555,13 +576,13 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef)>> Iterator for SimpleOccurrenc
             }
         }
 
-        let (next_doc, word) = self.iter.next()?;
+        let (next_doc, word, proximity) = self.iter.next()?;
         let contents = if let Some(c) = self.document_contents.get(&next_doc) {
             c
         } else {
             failed_to_find_document_in_provided_documents()
         };
-        self.current = Some((contents.split(word_pattern), next_doc, word));
+        self.current = Some((contents.split(word_pattern), next_doc, word, proximity));
         self.current_pos = 0;
         self.next()
     }
@@ -619,7 +640,9 @@ impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
 
     fn occurrences_of_word(&'a self, word: &'a str) -> Option<Self::Iter> {
         // `TODO`: Optimize, don't use two proximate iters.
-        let words = proximity::proximate_words(word, self.index).collect();
+        let words = proximity::proximate_words(word, self.index)
+            .map(|(word, _proximity)| word)
+            .collect();
         Some(SimpleOccurrencesIter::new(
             crate::proximity::proximate_word_docs(word, self.index),
             words,

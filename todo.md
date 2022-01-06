@@ -5,7 +5,7 @@
 -   [x] string proximity - give back iterator with all similar words.
         Have struct with iter of words, and the docs within that word.
         Then, read word till end, then advance words, etc.
-    -   [ ] Make this affect the rating.
+    -   [x] Make this affect the rating.
     -   [ ] Maybe use https://docs.rs/strsim/0.10.0/strsim/fn.hamming.html, but make the longer string the same len as the shorter. Then, add the diff of the len of them. (10x faster than Jaro)
             Use 1/(0.1x + 1) to get a jaro-like value.
 -   [x] Have AND NOT return results when they are in the same doc, but with lower rating.

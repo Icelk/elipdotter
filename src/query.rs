@@ -182,7 +182,7 @@ impl Query {
         provider: &'a impl index::Provider<'a>,
     ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
         self.root.as_doc_iter(
-            &mut |s| Some(proximity::proximate_word_docs(s, provider).map(|(id, _)| id)),
+            &mut |s| Some(proximity::proximate_word_docs(s, provider).map(|(id, _, _)| id)),
             &|i, _| i,
             &set::intersect,
         )
@@ -231,7 +231,6 @@ impl Query {
             fn new(occ: Occurence) -> Self {
                 Self(Hit {
                     occurrence: occ,
-                    rating: 0.0,
                     conditional_occurrences: BTreeSet::new(),
                     closest_not: None,
                 })
@@ -338,7 +337,7 @@ impl Query {
                 if dist > self.distance_threshold {
                     return Some(next);
                 }
-                next.0.rating += 2.0;
+                *next.0.rating_mut() += 2.0;
                 drop(self.next());
                 Some(next)
             }
@@ -367,7 +366,7 @@ impl Query {
                                 // Don't really care about precision.
                                 #[allow(clippy::cast_precision_loss)]
                                 let rating_increase = 1.0 / (0.001 * closest as f32 + 0.1);
-                                and.0.rating += rating_increase;
+                                *and.0.rating_mut() += rating_increase;
                             }
                             Some(and)
                         }
@@ -377,7 +376,7 @@ impl Query {
                             // Don't really care about precision.
                             #[allow(clippy::cast_precision_loss)]
                             let rating_decrease = 1.0 / (0.005 * closest.0 as f32 + 0.1);
-                            and.0.rating -= rating_decrease;
+                            *and.0.rating_mut() -= rating_decrease;
                             and.0.closest_not = Some(closest.1);
                             Some(and)
                         }
@@ -406,7 +405,6 @@ impl Query {
 pub struct Hit {
     occurrence: Occurence,
 
-    rating: f32,
     conditional_occurrences: BTreeSet<ConditionalOccurrence>,
 
     closest_not: Option<ConditionalOccurrence>,
@@ -432,7 +430,10 @@ impl Hit {
     /// Get the hit's rating.
     #[must_use]
     pub fn rating(&self) -> f32 {
-        self.rating
+        self.occurrence.rating()
+    }
+    fn rating_mut(&mut self) -> &mut f32 {
+        self.occurrence.rating_mut()
     }
     pub fn conditional_occurrences(&self) -> impl Iterator<Item = ConditionalOccurrence> + '_ {
         self.conditional_occurrences.iter().copied()
