@@ -324,6 +324,12 @@ impl Query {
                     None => return Some(next),
                 };
 
+                println!(" {:?} {:?}", peeked.0, next.0);
+
+                if peeked.0.id() != next.0.id() {
+                    return Some(next);
+                }
+
                 let dist = peeked.0.start() - next.0.start();
                 if dist > 100 {
                     return Some(next);
