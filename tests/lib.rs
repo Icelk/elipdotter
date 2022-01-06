@@ -77,35 +77,33 @@ fn query_and_not_2() {
     drop(docs);
 
     let occ_provider = augment_simple(&index, &map);
-    {
-        let mut occurences = q.occurences(&occ_provider, 100).unwrap();
-        let next = occurences.next().unwrap();
-        assert_eq!(next.id(), map.get_id("doc 1").unwrap());
-        assert_eq!(next.start(), 399);
-        assert!(next.rating() <= 1.0);
-        assert!(next.rating() >= -1.0);
-        let next = occurences.next().unwrap();
-        assert_eq!(next.id(), map.get_id("doc_2").unwrap());
-        assert_eq!(next.start(), 348);
-        assert!(next.rating() < -0.0);
-        assert_eq!(occurences.next(), None);
-    }
+    let mut occurences = q.occurences(&occ_provider, 100).unwrap();
+    let next = occurences.next().unwrap();
+    assert_eq!(next.id(), map.get_id("doc 1").unwrap());
+    assert_eq!(next.start(), 399);
+    assert!(next.rating() <= 1.0);
+    assert!(next.rating() >= -1.0);
+    let next = occurences.next().unwrap();
+    assert_eq!(next.id(), map.get_id("doc_2").unwrap());
+    assert_eq!(next.start(), 348);
+    assert!(next.rating() < -0.0);
+    assert_eq!(occurences.next(), None);
 
-    // drop(q);
-    let missing = occ_provider.missing();
-    // occ_provider.missing().apply(&mut index);
+    drop(occurences);
+    occ_provider.missing().apply(&mut index);
 }
 #[test]
 // Same as `query_and_not_2` but q reversed.
 fn query_and_not_3() {
     let q = pq("-hac volutpat");
-    let (map, index) = docs();
+    let (map, mut index) = docs();
 
     let mut docs = q.documents(&index).unwrap();
 
     assert_eq!(docs.next(), Some(map.get_id("doc 1").unwrap()));
     // It does contain `hac`, but maybe they're far apart?
     assert_eq!(docs.next(), Some(map.get_id("doc_2").unwrap()));
+    drop(docs);
 
     let occ_provider = augment_simple(&index, &map);
     let mut occurences = q.occurences(&occ_provider, 100).unwrap();
@@ -119,4 +117,7 @@ fn query_and_not_3() {
     assert_eq!(next.start(), 348);
     assert!(next.rating() < -0.0);
     assert_eq!(occurences.next(), None);
+
+    drop(occurences);
+    occ_provider.missing().apply(&mut index);
 }
