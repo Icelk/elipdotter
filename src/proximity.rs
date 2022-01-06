@@ -19,15 +19,6 @@ impl<'a, WI: Iterator<Item = &'a AlphanumRef>, WFI: Iterator<Item = &'a Alphanum
     }
 }
 
-struct IntoIterClone<I: Iterator<Item = char> + Clone>(I);
-impl<'a, I: Iterator<Item = char> + Clone> IntoIterator for &'a IntoIterClone<I> {
-    type IntoIter = I;
-    type Item = char;
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.clone()
-    }
-}
-
 #[derive(Debug)]
 pub struct ProximateWordIter<'a, P: Provider<'a>> {
     word: &'a str,
@@ -38,14 +29,10 @@ impl<'a, P: Provider<'a>> Iterator for ProximateWordIter<'a, P> {
     type Item = (&'a AlphanumRef, f32);
     fn next(&mut self) -> Option<Self::Item> {
         for other_word in &mut self.iter {
-            let other = other_word.chars();
-            let own = self.word.chars();
+            let similarity = algo::jaro(other_word.chars(), self.word.chars());
 
-            let other = IntoIterClone(other);
-            let own = IntoIterClone(own);
-
-            let similarity = strsim::generic_jaro(&other, &own);
             if similarity > self.threshold {
+                #[allow(clippy::cast_possible_truncation)]
                 return Some((other_word, similarity as f32));
             }
         }
@@ -143,5 +130,52 @@ pub fn proximate_word_docs<'a, P: Provider<'a>>(
         current: None,
         provider,
         // accepted_words: BTreeSet::new(),
+    }
+}
+
+// They don't happen.
+#[allow(clippy::missing_panics_doc)]
+pub mod algo {
+    struct IntoIterClone<I: Iterator<Item = char> + Clone>(I);
+    impl<'a, I: Iterator<Item = char> + Clone> IntoIterator for &'a IntoIterClone<I> {
+        type IntoIter = I;
+        type Item = char;
+        fn into_iter(self) -> Self::IntoIter {
+            self.0.clone()
+        }
+    }
+
+    pub trait IClo: Iterator<Item = char> + Clone {}
+    impl<T: Iterator<Item = char> + Clone> IClo for T {}
+
+    /// The currently used.
+    pub fn jaro(a: impl IClo, b: impl IClo) -> f64 {
+        strsim::generic_jaro(&IntoIterClone(a), &IntoIterClone(b))
+    }
+    /// 5-10x faster than [`jaro`], but is quality same?
+    pub fn hamming(a: impl IClo, b: impl IClo) -> f64 {
+        let a = IntoIterClone(a);
+        let b = IntoIterClone(b);
+
+        let a_count = a.into_iter().count();
+        let b_count = b.into_iter().count();
+
+        let min = std::cmp::min(a_count, b_count);
+        let max = std::cmp::max(a_count, b_count);
+        let len_diff = max - min;
+
+        let clamped_a = a.into_iter().take(min);
+        let clamped_b = b.into_iter().take(min);
+
+        // UNWRAP: They have the same length - ↑ .take
+        let mut differences =
+            strsim::generic_hamming(&IntoIterClone(clamped_a), &IntoIterClone(clamped_b)).unwrap();
+        differences += len_diff;
+
+        // We don't care about precision.
+        #[allow(clippy::cast_precision_loss)]
+        {
+            1.0 / (0.05 * differences as f64 + 1.0)
+        }
     }
 }
