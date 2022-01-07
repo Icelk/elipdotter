@@ -207,6 +207,8 @@ impl ToOwned for StrPtr {
         Self::owned(s)
     }
 }
+unsafe impl Send for StrPtr {}
+unsafe impl Sync for StrPtr {}
 
 pub(crate) type AlphanumRef = Alphanumeral<StrPtr>;
 
