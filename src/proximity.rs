@@ -119,8 +119,6 @@ impl<'a, P: Provider<'a>> Iterator for ProximateDocIter<'a, P> {
         }
     }
 }
-/// `word_count_limit` is the limit where only words starting with the first [`char`] of `word`
-/// will be checked for proximity.
 pub fn proximate_word_docs<'a, P: Provider<'a>>(
     word: &'a str,
     provider: &'a P,

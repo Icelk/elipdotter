@@ -221,7 +221,7 @@ impl Query {
     /// [`index::SimpleOccurences`], for example, panics if you haven't supplied all the necessary
     /// documents.
     #[allow(clippy::too_many_lines)]
-    pub fn occurences<'a>(
+    pub fn occurrences<'a>(
         &'a self,
         provider: &'a impl index::OccurenceProvider<'a>,
         distance_threshold: usize,
@@ -464,7 +464,7 @@ pub enum IterError {
 }
 
 pub mod parse {
-    use std::fmt::Debug;
+    use std::fmt::{self, Debug, Display};
     use std::str::FromStr;
 
     use super::{BinaryPart, Part, Query};
@@ -725,6 +725,18 @@ pub mod parse {
         NotEnoughArguments,
         UnexpectedParentheses,
     }
+    impl Display for Error {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Self::InputEmpty => f.write_str("input empty"),
+                Self::NotEnoughArguments => f.write_str(
+                    "logic operation got too few arguments (missing word after AND or OR?)",
+                ),
+                Self::UnexpectedParentheses => f.write_str("parentheses in an unexpected place"),
+            }
+        }
+    }
+
     #[derive(Debug)]
     #[must_use]
     pub struct Options {

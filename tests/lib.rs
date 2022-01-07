@@ -48,7 +48,7 @@ fn query_and() {
     assert_eq!(docs.next(), None);
 
     let occ_provider = augment_simple(&index, &map);
-    let mut occurences = q.occurences(&occ_provider, 100).unwrap();
+    let mut occurences = q.occurrences(&occ_provider, 100).unwrap();
     let next = occurences.next().unwrap();
     assert_eq!(next.id(), map.get_id("doc_2").unwrap());
     assert_eq!(next.start(), 238);
@@ -77,7 +77,7 @@ fn query_and_not_2() {
     drop(docs);
 
     let occ_provider = augment_simple(&index, &map);
-    let mut occurences = q.occurences(&occ_provider, 100).unwrap();
+    let mut occurences = q.occurrences(&occ_provider, 100).unwrap();
     let next = occurences.next().unwrap();
     assert_eq!(next.id(), map.get_id("doc 1").unwrap());
     assert_eq!(next.start(), 399);
@@ -106,7 +106,7 @@ fn query_and_not_3() {
     drop(docs);
 
     let occ_provider = augment_simple(&index, &map);
-    let mut occurences = q.occurences(&occ_provider, 100).unwrap();
+    let mut occurences = q.occurrences(&occ_provider, 100).unwrap();
     let next = occurences.next().unwrap();
     assert_eq!(next.id(), map.get_id("doc 1").unwrap());
     assert_eq!(next.start(), 399);
