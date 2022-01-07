@@ -42,10 +42,6 @@ impl Occurence {
             rating: 0.0,
         }
     }
-    fn with_rating(mut self, rating: f32) -> Self {
-        self.rating = rating;
-        self
-    }
     #[must_use]
     pub fn start(&self) -> usize {
         self.start
