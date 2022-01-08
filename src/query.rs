@@ -3,7 +3,7 @@ use std::fmt::{self, Debug, Display};
 use std::iter::Peekable;
 
 use crate::index::Occurence;
-use crate::index::{self, ConditionalOccurrence};
+use crate::index::{self, AssociatedOccurrence};
 use crate::{proximity, set};
 pub use parse::{parse, Options as ParseOptions};
 
@@ -226,12 +226,13 @@ impl Query {
         provider: &'a impl index::OccurenceProvider<'a>,
         distance_threshold: usize,
     ) -> Result<impl Iterator<Item = Hit> + 'a, IterError> {
+        #[derive(Debug)]
         struct OccurenceEq(Hit);
         impl OccurenceEq {
             fn new(occ: Occurence) -> Self {
                 Self(Hit {
                     occurrence: occ,
-                    conditional_occurrences: BTreeSet::new(),
+                    associated_occurrences: BTreeSet::new(),
                     closest_not: None,
                 })
             }
@@ -239,21 +240,21 @@ impl Query {
                 self.0
             }
             #[must_use]
-            fn closest(&self, other: &Self) -> (usize, ConditionalOccurrence) {
+            fn closest(&self, other: &Self) -> (usize, AssociatedOccurrence) {
                 use std::cmp::Ordering;
-                let mut closest = (usize::MAX, ConditionalOccurrence::new(0));
-                let mut a_iter = self.0.conditional_occurrences().map(|c| c.start());
-                // If `conditional_occurrences` has len 0, use only start.
+                let mut closest = (usize::MAX, AssociatedOccurrence::new(0));
+                let mut a_iter = self.0.associated_occurrences().map(|c| c.start());
+                // If `associated_occurrences` has len 0, use only start.
                 // Else, it'll have >=2 occurences, since the `.start()` is also taken as part of
                 // the BTreeSet.
                 let mut a = a_iter.next().unwrap_or_else(|| self.0.start());
-                let mut b_iter = other.0.conditional_occurrences().map(|c| c.start());
+                let mut b_iter = other.0.associated_occurrences().map(|c| c.start());
                 let mut b = b_iter.next().unwrap_or_else(|| other.0.start());
                 let mut one_completed = false;
                 loop {
                     let dist = if a > b { a - b } else { b - a };
                     closest =
-                        std::cmp::min_by((dist, ConditionalOccurrence::new(b)), closest, |a, b| {
+                        std::cmp::min_by((dist, AssociatedOccurrence::new(b)), closest, |a, b| {
                             a.0.cmp(&b.0)
                         });
                     match a.cmp(&b) {
@@ -269,7 +270,7 @@ impl Query {
                         // The words are at the same place!
                         //
                         // This is technically not reachable, but the following codes makes sense.
-                        Ordering::Equal => return (0, ConditionalOccurrence::new(b)),
+                        Ordering::Equal => return (0, AssociatedOccurrence::new(b)),
                         Ordering::Greater => {
                             if let Some(next) = b_iter.next() {
                                 b = next;
@@ -403,16 +404,36 @@ impl Query {
                 },
             )
             .map(|iter| iter.map(OccurenceEq::inner))
+            .map(|iter| {
+                iter.map(|mut occurrence| {
+                    let mut closest = usize::MAX;
+                    let mut iter = occurrence.associated_occurrences();
+                    let mut last = iter.next().unwrap_or_else(|| AssociatedOccurrence::new(0));
+                    for occ in iter {
+                        let dist = occ.start() - last.start();
+                        closest = std::cmp::min(dist, closest);
+                        last = occ;
+                    }
+                    if closest < usize::MAX {
+                        // Don't really care about precision.
+                        #[allow(clippy::cast_precision_loss)]
+                        let rating_increase = 1.0 / (0.001 * closest as f32 + 0.1);
+                        *occurrence.rating_mut() += rating_increase;
+                    }
+
+                    occurrence
+                })
+            })
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub struct Hit {
     occurrence: Occurence,
 
-    conditional_occurrences: BTreeSet<ConditionalOccurrence>,
+    associated_occurrences: BTreeSet<AssociatedOccurrence>,
 
-    closest_not: Option<ConditionalOccurrence>,
+    closest_not: Option<AssociatedOccurrence>,
 }
 impl Hit {
     /// Get a reference to the hit's document id.
@@ -422,7 +443,7 @@ impl Hit {
     }
     /// Get a reference to the hit's document id.
     ///
-    /// This might be any of the [`Self::conditional_occurrences`] if that returns any items.
+    /// This might be any of the [`Self::associated_occurrences`] if that returns any items.
     #[must_use]
     pub fn start(&self) -> usize {
         self.occurrence.start()
@@ -440,21 +461,41 @@ impl Hit {
     fn rating_mut(&mut self) -> &mut f32 {
         self.occurrence.rating_mut()
     }
-    pub fn conditional_occurrences(&self) -> impl Iterator<Item = ConditionalOccurrence> + '_ {
-        self.conditional_occurrences.iter().copied()
+    pub fn associated_occurrences(&self) -> impl Iterator<Item = AssociatedOccurrence> + '_ {
+        self.associated_occurrences.iter().copied()
     }
 
     /// Must have the same [document id](id()).
     fn merge(&mut self, other: &Self) {
-        if self.conditional_occurrences.is_empty() {
-            self.conditional_occurrences
-                .insert(index::ConditionalOccurrence::new(self.start()));
+        if self.associated_occurrences.is_empty() {
+            self.associated_occurrences
+                .insert(index::AssociatedOccurrence::new(self.start()));
         }
-        for other_occ in other.conditional_occurrences() {
-            self.conditional_occurrences.insert(other_occ);
+        for other_occ in other.associated_occurrences() {
+            self.associated_occurrences.insert(other_occ);
         }
-        self.conditional_occurrences
-            .insert(index::ConditionalOccurrence::new(other.start()));
+        self.associated_occurrences
+            .insert(index::AssociatedOccurrence::new(other.start()));
+    }
+}
+impl PartialEq for Hit {
+    fn eq(&self, other: &Self) -> bool {
+        self.id() == other.id() && self.start() == other.start()
+    }
+}
+impl Eq for Hit {}
+impl PartialOrd for Hit {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Hit {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering::Equal;
+        match self.id().cmp(&other.id()) {
+            Equal => self.start().cmp(&other.start()),
+            cmp => cmp,
+        }
     }
 }
 

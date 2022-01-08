@@ -61,14 +61,14 @@ impl Occurence {
 /// If [`Occurence`] is part of an AND, these can be associated to tell where the other parts of
 /// the AND chain are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ConditionalOccurrence {
+pub struct AssociatedOccurrence {
     start: usize,
 }
-impl ConditionalOccurrence {
+impl AssociatedOccurrence {
     pub(crate) fn new(start: usize) -> Self {
         Self { start }
     }
-    /// Get the conditional occurrence's start.
+    /// Get the associated occurrence's start.
     #[must_use]
     pub fn start(&self) -> usize {
         self.start
