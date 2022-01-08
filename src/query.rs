@@ -408,6 +408,11 @@ impl Query {
                         return and;
                     }
 
+                    // `TODO`: Use iterators here again.
+                    // This requires a `iter_set::classify` function which keeps the last `b` if
+                    // there isn't a new one that's closer.
+                    //
+                    // This is because the NOT needs to persist while the ANDs go by.
                     Part::iter_to_box(and.map(move |mut and| {
                         // UNWRAP: It's not empty.
                         let not = get_before_closest_btreeset(&not, &and.0).unwrap();
@@ -425,43 +430,6 @@ impl Query {
                         }
                         and
                     }))
-                    // iter_set::classify(
-                    // and.inspect(|and| println!("  AND {:?}", and.0)),
-                    // not.inspect(|not| println!("  N OT {:?}", not.0)),
-                    // )
-                    // .filter_map(|inclusion| {
-                    // println!("Inclusion {:?}", inclusion);
-                    // match inclusion {
-                    // iter_set::Inclusion::Left(mut and) => {
-                    // let mut closest = usize::MAX;
-                    // let mut iter = and.0.associated_occurrences();
-                    // let mut last =
-                    // iter.next().unwrap_or_else(|| AssociatedOccurrence::new(0));
-                    // for occ in iter {
-                    // let dist = occ.start() - last.start();
-                    // closest = std::cmp::min(dist, closest);
-                    // last = occ;
-                    // }
-                    // if closest < usize::MAX {
-                    // // Don't really care about precision.
-                    // #[allow(clippy::cast_precision_loss)]
-                    // let rating_increase = 1.0 / (0.001 * closest as f32 + 0.1);
-                    // *and.0.rating_mut() += rating_increase;
-                    // }
-                    // Some(and)
-                    // }
-                    // iter_set::Inclusion::Right(_not) => None,
-                    // iter_set::Inclusion::Both(mut and, not) => {
-                    // let closest = and.closest(&not);
-                    // // Don't really care about precision.
-                    // #[allow(clippy::cast_precision_loss)]
-                    // let rating_decrease = 1.0 / (0.005 * closest.0 as f32 + 0.1);
-                    // *and.0.rating_mut() -= rating_decrease;
-                    // and.0.closest_not = Some(closest.1);
-                    // Some(and)
-                    // }
-                    // }
-                    // })
                 },
                 &|left, right| {
                     iter_set::classify(left, right).filter_map(|inclusion| {
