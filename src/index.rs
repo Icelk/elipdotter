@@ -521,7 +521,7 @@ fn word_pattern(c: char) -> bool {
 #[derive(Debug)]
 pub struct SimpleOccurrencesIter<'a, I> {
     iter: I,
-    words: BTreeSet<&'a AlphanumRef>,
+    words: BTreeMap<&'a AlphanumRef, f32>,
 
     document_contents: &'a HashMap<Id, Arc<String>>,
 
@@ -540,7 +540,7 @@ pub struct SimpleOccurrencesIter<'a, I> {
 impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> SimpleOccurrencesIter<'a, I> {
     fn new(
         iter: I,
-        words: BTreeSet<&'a AlphanumRef>,
+        words: BTreeMap<&'a AlphanumRef, f32>,
         document_contents: &'a HashMap<Id, Arc<String>>,
         missing: &'a Mutex<Vec<(Id, &'a AlphanumRef)>>,
     ) -> Self {
@@ -570,9 +570,9 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> Iterator for SimpleOccu
                 if word.chars().next().is_none() {
                     continue;
                 }
-                if self.words.contains(&word_ptr) {
+                if let Some(word_proximity) = self.words.get(&word_ptr) {
                     self.current_doc_matched = true;
-                    let rating = (*proximity - 1.0) * 4.0;
+                    let rating = ((*proximity - 1.0) * 4.0) + ((*word_proximity - 1.0) * 4.0);
                     let mut occ = Occurence::new(start, *doc_id);
                     *occ.rating_mut() += rating;
                     return Some(occ);
