@@ -424,7 +424,7 @@ impl Query {
                             }));
                             // Don't really care about precision.
                             #[allow(clippy::cast_precision_loss)]
-                            let rating_decrease = 1.0 / (0.005 * closest.0 as f32 + 0.1);
+                            let rating_decrease = 1.0 / (0.0001 * closest.0 as f32 + 0.025);
                             *and.0.rating_mut() -= rating_decrease;
                             and.0.closest_not = Some(closest.1);
                         }
