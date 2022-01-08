@@ -344,6 +344,7 @@ impl Query {
                     return Some(next);
                 }
                 *next.0.rating_mut() += 2.0;
+                next.0.merge(&peeked.0);
                 drop(self.next());
                 Some(next)
             }
