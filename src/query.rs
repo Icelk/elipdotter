@@ -576,9 +576,12 @@ pub mod parse {
 
         loop {
             let advance = parser.next(opts, rest)?;
-            rest = rest
-                .get(advance..)
-                .expect("handle utf codepoint error, also this might bee too long.");
+            rest = if let Some(rest) = rest.get(advance..) {
+                rest
+            } else {
+                return parser.finish();
+            };
+
             if rest.is_empty() {
                 return parser.finish();
             }
@@ -605,7 +608,7 @@ pub mod parse {
     impl Parser {
         fn take_string(&mut self) -> Part {
             let string = std::mem::replace(&mut self.string, String::with_capacity(8));
-            let part = Part::String(string);
+            let part = Part::String(crate::index::Alphanumeral::new(&string).chars().collect());
             if let Some(marker) = self.string_marker.take() {
                 match marker {
                     Op::Not => Part::not(part),
