@@ -311,6 +311,21 @@ impl WordOccurrence {
         self.pos
     }
 }
+/// Returns the next valid UTF-8 character.
+#[must_use]
+pub fn next_char(c: char) -> char {
+    let mut int = c as u32;
+    let max = char::MAX as u32;
+    loop {
+        int += 1;
+        if let Some(c) = char::from_u32(int) {
+            return c;
+        }
+        if int >= max {
+            return c;
+        }
+    }
+}
 /// Allows to insert words and remove occurrences from documents.
 pub trait Provider<'a> {
     type DocumentIter: Iterator<Item = Id> + ExactSizeIterator + 'a;
@@ -488,8 +503,7 @@ impl<'a> Provider<'a> for Simple {
     fn words_starting_with(&'a self, c: char) -> Self::WordFilteredIter {
         let s1 = String::from(c);
         let ptr1 = StrPtr::owned(s1);
-        let mut s2 = String::from(c);
-        s2.push(char::MAX);
+        let s2 = String::from(next_char(c));
         let ptr2 = StrPtr::owned(s2);
 
         self.words
