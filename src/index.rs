@@ -592,7 +592,7 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> Iterator for SimpleOccu
         let contents = if let Some(c) = self.document_contents.get(&next_doc) {
             c
         } else {
-            failed_to_find_document_in_provided_documents(next_doc, word)
+            return self.next();
         };
         self.current = Some((contents.split(word_pattern), next_doc, word, proximity));
         self.current_pos = 0;
@@ -601,9 +601,6 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> Iterator for SimpleOccu
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.iter.size_hint()
     }
-}
-fn failed_to_find_document_in_provided_documents(next_doc: Id, word: impl AsRef<str>) -> ! {
-    panic!("Tried to get a document ({:?}) from the provided documents in `SimpleProvider`, but failed. Word: '{}'.", next_doc, word.as_ref())
 }
 #[derive(Debug)]
 #[must_use]
