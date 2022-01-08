@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use crate::index::{AlphanumRef, Id, Provider};
+use crate::index::{AlphanumRef, Alphanumeral, Id, Provider};
 
 #[derive(Debug)]
 enum PIter<'a, WI: Iterator<Item = &'a AlphanumRef>, WFI: Iterator<Item = &'a AlphanumRef>> {
@@ -19,17 +19,46 @@ impl<'a, WI: Iterator<Item = &'a AlphanumRef>, WFI: Iterator<Item = &'a Alphanum
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum Algorithm {
+    /// about 10x as slow as [`Self::Exact`],
+    /// but actually accepts similar words.
+    Hamming,
+    /// 2x as slow as [`Self::Hamming`],
+    /// but produces higher quality.
+    /// Still nothing compared to parsing of HTML.
+    Jaro,
+    /// Only exact matches are accepted. The absolute fastest.
+    Exact,
+}
+impl Algorithm {
+    pub fn similarity(&self, a: impl algo::IClo, b: impl algo::IClo) -> f64 {
+        match self {
+            Self::Hamming => algo::hamming(a, b),
+            Self::Jaro => algo::jaro(a, b),
+            Self::Exact => {
+                if a.into_iter().eq(b.into_iter()) {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct ProximateWordIter<'a, P: Provider<'a>> {
     word: &'a str,
     iter: PIter<'a, P::WordIter, P::WordFilteredIter>,
     threshold: f64,
+    algo: Algorithm,
 }
 impl<'a, P: Provider<'a>> Iterator for ProximateWordIter<'a, P> {
     type Item = (&'a AlphanumRef, f32);
     fn next(&mut self) -> Option<Self::Item> {
         for other_word in &mut self.iter {
-            let similarity = algo::jaro(other_word.chars(), self.word.chars());
+            let similarity = self.algo.similarity(other_word.chars(), self.word.chars());
 
             if similarity > self.threshold {
                 #[allow(clippy::cast_possible_truncation)]
@@ -47,12 +76,14 @@ pub fn proximate_words<'a, P: Provider<'a>>(
     provider: &'a P,
 ) -> ProximateWordIter<'a, P> {
     let threshold = provider.word_proximity_threshold();
-    if let Some(c) = word.chars().next() {
+    if let Some(c) = Alphanumeral::new(word).chars().next() {
         if provider.word_count_upper_limit() > provider.word_count_limit() {
+            let iter = PIter::WordFilteredIter(provider.words_starting_with(c));
             return ProximateWordIter {
                 word,
-                iter: PIter::WordFilteredIter(provider.words_starting_with(c)),
+                iter,
                 threshold,
+                algo: provider.word_proximity_algorithm(),
             };
         }
     }
@@ -60,6 +91,7 @@ pub fn proximate_words<'a, P: Provider<'a>>(
         word,
         iter: PIter::WordIter(provider.words()),
         threshold,
+        algo: provider.word_proximity_algorithm(),
     }
 }
 

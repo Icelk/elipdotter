@@ -345,6 +345,7 @@ pub trait Provider<'a> {
     fn words_starting_with(&'a self, c: char) -> Self::WordFilteredIter;
 
     fn word_proximity_threshold(&self) -> f64;
+    fn word_proximity_algorithm(&self) -> proximity::Algorithm;
 
     /// Only adds words which are alphanumeric.
     fn digest_document(&mut self, id: Id, content: &str) {
@@ -405,21 +406,30 @@ impl Default for SimpleDocRef {
 #[must_use]
 pub struct Simple {
     words: BTreeMap<AlphanumRef, SimpleDocRef>,
+
     proximity_threshold: f64,
+    proximity_algo: proximity::Algorithm,
     word_count_limit: usize,
 }
 impl Simple {
     /// `proximity_threshold` is the threshold where alike words are also accepted.
     /// It uses the range [0..1], where values nearer 0 allow more words.
-    ///
     /// The default is `0.9`.
+    ///
+    /// `proximity_threshold` is the algorithm used for proximity checking of words.
     ///
     /// `word_count_limit` is the number of words in this index where only words with the first
     /// character is used for approximate matching.
-    pub fn new(proximity_threshold: f64, word_count_limit: usize) -> Self {
+    /// Default is `2_500`.
+    pub fn new(
+        proximity_threshold: f64,
+        proximity_algorithm: proximity::Algorithm,
+        word_count_limit: usize,
+    ) -> Self {
         Self {
             words: BTreeMap::new(),
             proximity_threshold,
+            proximity_algo: proximity_algorithm,
             word_count_limit,
         }
     }
@@ -439,7 +449,7 @@ impl Simple {
 /// [`Self::new`] with `proximity_threshold` set to `0.9`.
 impl Default for Simple {
     fn default() -> Self {
-        Self::new(0.9, 5000)
+        Self::new(0.85, proximity::Algorithm::Hamming, 2_500)
     }
 }
 type FirstTy<'a> = fn((&'a AlphanumRef, &'a SimpleDocRef)) -> &'a AlphanumRef;
@@ -513,6 +523,9 @@ impl<'a> Provider<'a> for Simple {
 
     fn word_proximity_threshold(&self) -> f64 {
         self.proximity_threshold
+    }
+    fn word_proximity_algorithm(&self) -> proximity::Algorithm {
+        self.proximity_algo
     }
 }
 fn word_pattern(c: char) -> bool {
@@ -645,19 +658,36 @@ impl<'a> SimpleOccurences<'a> {
     }
 }
 impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
-    type Iter = SimpleOccurrencesIter<'a, crate::proximity::ProximateDocIter<'a, Simple>>;
+    type Iter =
+        SimpleOccurrencesIter<'a, Box<dyn Iterator<Item = (Id, &'a AlphanumRef, f32)> + 'a>>;
 
     fn occurrences_of_word(&'a self, word: &'a str) -> Option<Self::Iter> {
-        // `TODO`: Optimize, don't use two proximate iters.
-        let words = proximity::proximate_words(word, self.index)
-            .map(|(word, _proximity)| word)
-            .collect();
-        Some(SimpleOccurrencesIter::new(
-            crate::proximity::proximate_word_docs(word, self.index),
-            words,
-            &self.document_contents,
-            &self.missing,
-        ))
+        if let proximity::Algorithm::Exact = self.index.word_proximity_algorithm() {
+            // SAFETY: We only use it in this scope.
+            let ptr = unsafe { StrPtr::sref(word) };
+            let word = self.index.words.get_key_value(&Alphanumeral::new(ptr))?.0;
+            let words = [(word, 1.0)].into_iter().collect();
+
+            Some(SimpleOccurrencesIter::new(
+                Box::new(
+                    self.index
+                        .documents_with_word(word)?
+                        .map(move |id| (id, word, 1.0)),
+                ),
+                words,
+                &self.document_contents,
+                &self.missing,
+            ))
+        } else {
+            // `TODO`: Optimize, don't use two proximate iters.
+            let words = proximity::proximate_words(word, self.index).collect();
+            Some(SimpleOccurrencesIter::new(
+                Box::new(crate::proximity::proximate_word_docs(word, self.index)),
+                words,
+                &self.document_contents,
+                &self.missing,
+            ))
+        }
     }
 }
 #[derive(Debug)]

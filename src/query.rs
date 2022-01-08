@@ -93,19 +93,21 @@ impl Part {
     fn iter_to_box<'a, T>(iter: impl Iterator<Item = T> + 'a) -> Box<dyn Iterator<Item = T> + 'a> {
         Box::new(iter)
     }
-    fn as_doc_iter<
-        'a,
-        T: Ord + 'a,
-        I: Iterator<Item = T> + 'a,
-        ModI: Iterator<Item = T> + 'a,
-        AndMI: Iterator<Item = T> + 'a,
-    >(
+    #[allow(clippy::type_complexity)]
+    fn fn_to_box<'a, T>(
+        f: impl FnMut(&'a str) -> Option<Box<dyn Iterator<Item = T> + 'a>> + 'a,
+    ) -> Box<(dyn FnMut(&'a str) -> Option<Box<dyn Iterator<Item = T> + 'a>> + 'a)> {
+        Box::new(f)
+    }
+    fn as_doc_iter<'a, T: Ord + 'a, AndMI: Iterator<Item = T> + 'a>(
         &'a self,
-        iter: &mut (impl FnMut(&'a str) -> Option<I> + 'a),
+        mut iter: impl std::ops::DerefMut<
+            Target = (impl FnMut(&'a str) -> Option<Box<dyn Iterator<Item = T> + 'a>> + ?Sized + 'a),
+        >,
         and_not_modify: &impl Fn(
             Box<dyn Iterator<Item = T> + 'a>,
             Box<dyn Iterator<Item = T> + 'a>,
-        ) -> ModI,
+        ) -> Box<dyn Iterator<Item = T> + 'a>,
         and_merger: &impl Fn(
             Box<dyn Iterator<Item = T> + 'a>,
             Box<dyn Iterator<Item = T> + 'a>,
@@ -113,21 +115,26 @@ impl Part {
     ) -> Result<Box<dyn Iterator<Item = T> + 'a>, IterError> {
         let iter = match self {
             Self::And(pair) => match (&pair.left, &pair.right) {
-                (other, Part::Not(not)) | (Part::Not(not), other) => Self::iter_to_box(
-                    // set::difference(other.as_doc_iter(iter, and_not_modify)?, not.as_doc_iter(iter, and_not_modify)?),
+                (other, Part::Not(not)) | (Part::Not(not), other) =>
+                // set::difference(other.as_doc_iter(iter, and_not_modify)?, not.as_doc_iter(iter, and_not_modify)?),
+                {
                     and_not_modify(
-                        other.as_doc_iter(iter, and_not_modify, and_merger)?,
-                        not.as_doc_iter(iter, and_not_modify, and_merger)?,
-                    ),
-                ),
+                        other.as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
+                        not.as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
+                    )
+                }
                 _ => Self::iter_to_box(and_merger(
-                    pair.left.as_doc_iter(iter, and_not_modify, and_merger)?,
-                    pair.right.as_doc_iter(iter, and_not_modify, and_merger)?,
+                    pair.left
+                        .as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
+                    pair.right
+                        .as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
                 )),
             },
             Self::Or(pair) => Self::iter_to_box(set::union(
-                pair.left.as_doc_iter(iter, and_not_modify, and_merger)?,
-                pair.right.as_doc_iter(iter, and_not_modify, and_merger)?,
+                pair.left
+                    .as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
+                pair.right
+                    .as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
             )),
             Self::Not(_) => return Err(IterError::StrayNot),
             Self::String(s) => {
@@ -182,7 +189,14 @@ impl Query {
         provider: &'a impl index::Provider<'a>,
     ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
         self.root.as_doc_iter(
-            &mut |s| Some(proximity::proximate_word_docs(s, provider).map(|(id, _, _)| id)),
+            if let proximity::Algorithm::Exact = provider.word_proximity_algorithm() {
+                Part::fn_to_box(|s| provider.documents_with_word(s).map(Part::iter_to_box))
+            } else {
+                Part::fn_to_box(|s| {
+                    Some(proximity::proximate_word_docs(s, provider).map(|(id, _, _)| id))
+                        .map(Part::iter_to_box)
+                })
+            },
             &|i, _| i,
             &set::intersect,
         )
@@ -202,8 +216,8 @@ impl Query {
         provider: &'a impl index::Provider<'a>,
     ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
         self.root.as_doc_iter(
-            &mut |s| provider.documents_with_word(s),
-            &set::difference,
+            &mut |s| provider.documents_with_word(s).map(Part::iter_to_box),
+            &|a, b| Part::iter_to_box(set::difference(a, b)),
             &set::intersect,
         )
     }
@@ -302,6 +316,7 @@ impl Query {
             }
         }
 
+        #[derive(Debug)]
         struct MergeProximate<I>
         where
             I: Iterator<Item = OccurenceEq>,
@@ -352,49 +367,104 @@ impl Query {
 
         self.root
             .as_doc_iter(
-                &mut |s| {
-                    provider
-                        .occurrences_of_word(s)
-                        .map(|iter| iter.map(OccurenceEq::new))
+                &mut move |s| {
+                    provider.occurrences_of_word(s).map(|iter| {
+                        Part::iter_to_box(MergeProximate::new(
+                            iter.map(OccurenceEq::new),
+                            distance_threshold,
+                        ))
+                    })
                 },
                 &|and, not| {
-                    iter_set::classify(and, not).filter_map(|inclusion| match inclusion {
-                        iter_set::Inclusion::Left(mut and) => {
-                            let mut closest = usize::MAX;
-                            let mut iter = and.0.conditional_occurrences();
-                            let mut last =
-                                iter.next().unwrap_or_else(|| ConditionalOccurrence::new(0));
-                            for occ in iter {
-                                let dist = occ.start() - last.start();
-                                closest = std::cmp::min(dist, closest);
-                                last = occ;
+                    fn get_closest_btreeset<'a, T: Ord>(
+                        set: &'a BTreeSet<T>,
+                        key: &T,
+                    ) -> (Option<&'a T>, Option<&'a T>) {
+                        (set.range(..key).next_back(), set.range(key..).next())
+                    }
+                    /// Returns [`None`] when `set` is empty.
+                    fn get_before_closest_btreeset<'a>(
+                        set: &'a BTreeSet<Hit>,
+                        key: &Hit,
+                    ) -> Option<&'a Hit> {
+                        let (before, after) = get_closest_btreeset(set, key);
+                        match (before, after) {
+                            (Some(before), Some(after)) => {
+                                if after.id() == key.id() {
+                                    Some(after)
+                                } else {
+                                    Some(before)
+                                }
                             }
-                            if closest < usize::MAX {
-                                // Don't really care about precision.
-                                #[allow(clippy::cast_precision_loss)]
-                                let rating_increase = 1.0 / (0.001 * closest as f32 + 0.1);
-                                *and.0.rating_mut() += rating_increase;
-                            }
-                            Some(and)
+                            (Some(before), None) => Some(before),
+                            (None, Some(after)) => Some(after),
+                            (None, None) => None,
                         }
-                        iter_set::Inclusion::Right(_not) => None,
-                        iter_set::Inclusion::Both(mut and, not) => {
-                            let closest = and.closest(&not);
+                    }
+
+                    let not: BTreeSet<_> = not.map(OccurenceEq::inner).collect();
+
+                    if not.is_empty() {
+                        return and;
+                    }
+
+                    Part::iter_to_box(and.map(move |mut and| {
+                        // UNWRAP: It's not empty.
+                        let not = get_before_closest_btreeset(&not, &and.0).unwrap();
+                        if not.id() == and.0.id() {
+                            let closest = and.closest(&OccurenceEq(Hit {
+                                occurrence: not.occurrence.clone(),
+                                associated_occurrences: BTreeSet::new(),
+                                closest_not: None,
+                            }));
                             // Don't really care about precision.
                             #[allow(clippy::cast_precision_loss)]
                             let rating_decrease = 1.0 / (0.005 * closest.0 as f32 + 0.1);
                             *and.0.rating_mut() -= rating_decrease;
                             and.0.closest_not = Some(closest.1);
-                            Some(and)
                         }
-                    })
+                        and
+                    }))
+                    // iter_set::classify(
+                    // and.inspect(|and| println!("  AND {:?}", and.0)),
+                    // not.inspect(|not| println!("  N OT {:?}", not.0)),
+                    // )
+                    // .filter_map(|inclusion| {
+                    // println!("Inclusion {:?}", inclusion);
+                    // match inclusion {
+                    // iter_set::Inclusion::Left(mut and) => {
+                    // let mut closest = usize::MAX;
+                    // let mut iter = and.0.associated_occurrences();
+                    // let mut last =
+                    // iter.next().unwrap_or_else(|| AssociatedOccurrence::new(0));
+                    // for occ in iter {
+                    // let dist = occ.start() - last.start();
+                    // closest = std::cmp::min(dist, closest);
+                    // last = occ;
+                    // }
+                    // if closest < usize::MAX {
+                    // // Don't really care about precision.
+                    // #[allow(clippy::cast_precision_loss)]
+                    // let rating_increase = 1.0 / (0.001 * closest as f32 + 0.1);
+                    // *and.0.rating_mut() += rating_increase;
+                    // }
+                    // Some(and)
+                    // }
+                    // iter_set::Inclusion::Right(_not) => None,
+                    // iter_set::Inclusion::Both(mut and, not) => {
+                    // let closest = and.closest(&not);
+                    // // Don't really care about precision.
+                    // #[allow(clippy::cast_precision_loss)]
+                    // let rating_decrease = 1.0 / (0.005 * closest.0 as f32 + 0.1);
+                    // *and.0.rating_mut() -= rating_decrease;
+                    // and.0.closest_not = Some(closest.1);
+                    // Some(and)
+                    // }
+                    // }
+                    // })
                 },
                 &|left, right| {
-                    iter_set::classify(
-                        MergeProximate::new(left, distance_threshold),
-                        MergeProximate::new(right, distance_threshold),
-                    )
-                    .filter_map(|inclusion| {
+                    iter_set::classify(left, right).filter_map(|inclusion| {
                         if let iter_set::Inclusion::Both(mut a, b) = inclusion {
                             a.0.merge(&b.0);
                             Some(a)
