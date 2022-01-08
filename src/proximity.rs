@@ -173,7 +173,7 @@ pub mod algo {
         // We don't care about precision.
         #[allow(clippy::cast_precision_loss)]
         {
-            1.0 / (0.05 * differences as f64 + 1.0)
+            1.0 / (1.0 * (differences as f64 / min as f64) + 1.0)
         }
     }
 }
