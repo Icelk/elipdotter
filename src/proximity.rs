@@ -58,6 +58,20 @@ impl<'a, P: Provider<'a>> Iterator for ProximateWordIter<'a, P> {
     type Item = (&'a AlphanumRef, f32);
     fn next(&mut self) -> Option<Self::Item> {
         for other_word in &mut self.iter {
+            let other_len = other_word.chars().count();
+            let len_diff = other_len.checked_sub(self.word.len());
+            if let Some(len_diff) = len_diff {
+                if other_word
+                    .chars()
+                    .take(self.word.len())
+                    .eq(self.word.chars())
+                {
+                    #[allow(clippy::cast_precision_loss)]
+                    let similarity = (1.0 / ((0.1 * len_diff as f32) + 0.5)) - 1.0;
+                    return Some((other_word, similarity));
+                }
+            }
+
             let similarity = self.algo.similarity(other_word.chars(), self.word.chars());
 
             if similarity > self.threshold {
