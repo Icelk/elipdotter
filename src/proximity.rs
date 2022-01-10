@@ -109,6 +109,43 @@ pub fn proximate_words<'a, P: Provider<'a>>(
     }
 }
 
+#[derive(Debug)]
+#[must_use]
+pub struct ProximateDocItem<'a> {
+    id: Id,
+    word: &'a AlphanumRef,
+    rating: f32,
+}
+impl<'a> PartialEq for ProximateDocItem<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+impl<'a> Eq for ProximateDocItem<'a> {}
+impl<'a> PartialOrd for ProximateDocItem<'a> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl<'a> Ord for ProximateDocItem<'a> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
+}
+impl<'a> ProximateDocItem<'a> {
+    pub fn new(item: (Id, &'a AlphanumRef, f32)) -> Self {
+        Self {
+            id: item.0,
+            word: item.1,
+            rating: item.2,
+        }
+    }
+    #[must_use]
+    pub fn into_parts(self) -> (Id, &'a AlphanumRef, f32) {
+        (self.id, self.word, self.rating)
+    }
+}
+
 pub struct ProximateDocIter<'a, P: Provider<'a>> {
     word_iter: ProximateWordIter<'a, P>,
     provider: &'a P,
@@ -165,6 +202,11 @@ impl<'a, P: Provider<'a>> Iterator for ProximateDocIter<'a, P> {
         }
     }
 }
+/// The output isn't ordered according to document IDs.
+///
+/// Use [`ProximateDocItem`] and [`Iterator::collect`] to map the iterator to the
+/// `ProximateDocItem`, then collect it in a [`BTreeSet`], then [`IntoIterator::into_iter`] and map
+/// again.
 pub fn proximate_word_docs<'a, P: Provider<'a>>(
     word: &'a str,
     provider: &'a P,

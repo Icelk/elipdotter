@@ -193,8 +193,13 @@ impl Query {
                 Part::fn_to_box(|s| provider.documents_with_word(s).map(Part::iter_to_box))
             } else {
                 Part::fn_to_box(|s| {
-                    Some(proximity::proximate_word_docs(s, provider).map(|(id, _, _)| id))
-                        .map(Part::iter_to_box)
+                    Some(
+                        proximity::proximate_word_docs(s, provider)
+                            .map(|(id, _, _)| id)
+                            .collect::<BTreeSet<_>>()
+                            .into_iter(),
+                    )
+                    .map(Part::iter_to_box)
                 })
             },
             &|i, _| i,

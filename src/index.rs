@@ -682,7 +682,13 @@ impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
             // `TODO`: Optimize, don't use two proximate iters.
             let words = proximity::proximate_words(word, self.index).collect();
             Some(SimpleOccurrencesIter::new(
-                Box::new(crate::proximity::proximate_word_docs(word, self.index)),
+                Box::new(
+                    crate::proximity::proximate_word_docs(word, self.index)
+                        .map(crate::proximity::ProximateDocItem::new)
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .map(crate::proximity::ProximateDocItem::into_parts),
+                ),
                 words,
                 &self.document_contents,
                 &self.missing,
