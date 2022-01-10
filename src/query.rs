@@ -581,7 +581,11 @@ pub mod parse {
 
         loop {
             let advance = parser.next(opts, rest)?;
-            rest = if let Some(rest) = rest.get(advance..) {
+            rest = if let Some(rest) = rest
+                .char_indices()
+                .nth(advance)
+                .and_then(|(pos, _)| rest.get(pos..))
+            {
                 rest
             } else {
                 return parser.finish();
@@ -825,6 +829,14 @@ pub mod parse {
         }
     }
 
+    /// Same as [`char::is_ascii_whitespace`], but including `\u{a0}`, non-breaking space.
+    #[must_use]
+    pub fn is_whitespace(c: char) -> bool {
+        if c == '\u{a0}' {
+        }
+        c.is_ascii_whitespace() || c == '\u{a0}'
+    }
+
     #[derive(Debug)]
     #[must_use]
     pub struct Options {
@@ -879,13 +891,13 @@ pub mod parse {
             }
             let c = rest.chars().next().unwrap();
             if self.last_was_other_op {
-                if c == ' ' || c == '-' {
+                if is_whitespace(c) || c == '-' {
                     None
                 } else {
                     self.last_was_other_op = false;
                     None
                 }
-            } else if c == ' ' || c == '-' {
+            } else if is_whitespace(c) || c == '-' {
                 parser.op = Some(Op::And);
                 Some(1)
             } else {
@@ -942,7 +954,7 @@ pub mod parse {
                 && rest
                     .chars()
                     .nth(self.literal.len())
-                    .map_or(false, |c| c == ' ')
+                    .map_or(false, is_whitespace)
             {
                 parser.set_op(self.op);
                 Some(self.literal.len())
@@ -986,7 +998,7 @@ pub mod parse {
                 None
             };
 
-            self.last_was_space = rest.starts_with(' ');
+            self.last_was_space = rest.chars().next().map_or(false, is_whitespace);
 
             rule
         }
