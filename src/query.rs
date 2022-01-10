@@ -1165,7 +1165,10 @@ mod tests {
         assert_eq!(s("icelk.dev"), Part::s("icelkdev"));
         assert_eq!(
             s("next-generation kvarn"),
-            Part::and(Part::s("nextgeneration"), Part::s("kvarn"))
+            Part::and(
+                Part::and(Part::s("next"), Part::s("generation")),
+                Part::s("kvarn")
+            )
         );
     }
 
