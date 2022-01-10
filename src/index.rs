@@ -344,7 +344,7 @@ pub trait Provider<'a> {
     fn words(&'a self) -> Self::WordIter;
     fn words_starting_with(&'a self, c: char) -> Self::WordFilteredIter;
 
-    fn word_proximity_threshold(&self) -> f64;
+    fn word_proximity_threshold(&self) -> f32;
     fn word_proximity_algorithm(&self) -> proximity::Algorithm;
 
     /// Only adds words which are alphanumeric.
@@ -407,7 +407,7 @@ impl Default for SimpleDocRef {
 pub struct Simple {
     words: BTreeMap<AlphanumRef, SimpleDocRef>,
 
-    proximity_threshold: f64,
+    proximity_threshold: f32,
     proximity_algo: proximity::Algorithm,
     word_count_limit: usize,
 }
@@ -422,7 +422,7 @@ impl Simple {
     /// character is used for approximate matching.
     /// Default is `2_500`.
     pub fn new(
-        proximity_threshold: f64,
+        proximity_threshold: f32,
         proximity_algorithm: proximity::Algorithm,
         word_count_limit: usize,
     ) -> Self {
@@ -521,7 +521,7 @@ impl<'a> Provider<'a> for Simple {
             .map(|(k, _v)| k)
     }
 
-    fn word_proximity_threshold(&self) -> f64 {
+    fn word_proximity_threshold(&self) -> f32 {
         self.proximity_threshold
     }
     fn word_proximity_algorithm(&self) -> proximity::Algorithm {
