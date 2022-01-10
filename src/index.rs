@@ -349,7 +349,7 @@ pub trait Provider<'a> {
 
     /// Only adds words which are alphanumeric.
     fn digest_document(&mut self, id: Id, content: &str) {
-        for word in content.split(word_pattern) {
+        for (_, word) in SplitNonAlphanumeric::new(content) {
             if word.is_empty() {
                 continue;
             }
@@ -528,8 +528,38 @@ impl<'a> Provider<'a> for Simple {
         self.proximity_algo
     }
 }
-fn word_pattern(c: char) -> bool {
-    !c.is_alphanumeric()
+
+#[derive(Debug)]
+struct SplitNonAlphanumeric<'a> {
+    s: &'a str,
+    start: usize,
+}
+impl<'a> SplitNonAlphanumeric<'a> {
+    fn new(s: &'a str) -> Self {
+        Self { s, start: 0 }
+    }
+}
+impl<'a> Iterator for SplitNonAlphanumeric<'a> {
+    type Item = (usize, &'a str);
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut iter = self.s.get(self.start..).unwrap().char_indices();
+        // Not for because we need `iter.next()` below.
+        while let Some((pos, c)) = iter.next() {
+            if !c.is_alphanumeric() {
+                let old_start = self.start;
+                self.start = self
+                    .start
+                    .saturating_add(iter.next().map_or(c.len_utf8(), |(pos, _)| pos));
+                return Some((old_start, self.s.get(old_start..old_start + pos).unwrap()));
+            }
+        }
+        let s = self.s.get(self.start..).unwrap();
+        if !s.is_empty() {
+            self.start += s.len();
+            return Some((self.start, s));
+        }
+        None
+    }
 }
 #[derive(Debug)]
 pub struct SimpleOccurrencesIter<'a, I> {
@@ -539,13 +569,7 @@ pub struct SimpleOccurrencesIter<'a, I> {
     document_contents: &'a HashMap<Id, Arc<String>>,
 
     #[allow(clippy::type_complexity)] // That's not complex.
-    current: Option<(
-        std::str::Split<'a, fn(char) -> bool>,
-        Id,
-        &'a AlphanumRef,
-        f32,
-    )>,
-    current_pos: usize,
+    current: Option<(SplitNonAlphanumeric<'a>, Id, &'a AlphanumRef, f32)>,
     current_doc_matched: bool,
 
     missing: &'a Mutex<Vec<(Id, &'a AlphanumRef)>>,
@@ -562,7 +586,6 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> SimpleOccurrencesIter<'
             words,
             document_contents,
             current: None,
-            current_pos: 0,
             current_doc_matched: false,
             missing,
         }
@@ -572,9 +595,7 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> Iterator for SimpleOccu
     type Item = Occurence;
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((words_in_doc, doc_id, searching_word, proximity)) = &mut self.current {
-            for word_in_doc in words_in_doc {
-                let start = self.current_pos;
-                self.current_pos += word_in_doc.len() + 1;
+            for (start, word_in_doc) in words_in_doc {
                 // SAFETY: We only use it in this scope.
                 let word_ptr = unsafe { StrPtr::sref(word_in_doc) };
                 let word_ptr = Alphanumeral::new(word_ptr);
@@ -607,8 +628,12 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> Iterator for SimpleOccu
         } else {
             return self.next();
         };
-        self.current = Some((contents.split(word_pattern), next_doc, word, proximity));
-        self.current_pos = 0;
+        self.current = Some((
+            SplitNonAlphanumeric::new(contents),
+            next_doc,
+            word,
+            proximity,
+        ));
         self.next()
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
