@@ -733,6 +733,10 @@ impl MissingOccurrences {
             }
         }
     }
+    #[must_use]
+    pub fn list(&self) -> &[(Id, AlphanumRef)] {
+        &self.list
+    }
 }
 
 #[cfg(test)]
