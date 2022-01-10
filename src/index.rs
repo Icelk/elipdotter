@@ -529,7 +529,7 @@ impl<'a> Provider<'a> for Simple {
     }
 }
 fn word_pattern(c: char) -> bool {
-    c.is_ascii_whitespace() || c.is_ascii_punctuation()
+    !c.is_alphanumeric()
 }
 #[derive(Debug)]
 pub struct SimpleOccurrencesIter<'a, I> {
