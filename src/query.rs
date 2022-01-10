@@ -874,13 +874,13 @@ pub mod parse {
             }
             let c = rest.chars().next().unwrap();
             if self.last_was_other_op {
-                if c == ' ' {
+                if c == ' ' || c == '-' {
                     None
                 } else {
                     self.last_was_other_op = false;
                     None
                 }
-            } else if c == ' ' {
+            } else if c == ' ' || c == '-' {
                 parser.op = Some(Op::And);
                 Some(1)
             } else {
@@ -1153,6 +1153,14 @@ mod tests {
         assert_eq!(
             s("icelk !kvarn"),
             Part::and(Part::s("icelk"), Part::not("kvarn"))
+        );
+    }
+    #[test]
+    fn parse_non_alphanumeral() {
+        assert_eq!(s("icelk.dev"), Part::s("icelkdev"));
+        assert_eq!(
+            s("next-generation kvarn"),
+            Part::and(Part::s("nextgeneration"), Part::s("kvarn"))
         );
     }
 
