@@ -51,32 +51,49 @@ impl Algorithm {
 pub struct ProximateWordIter<'a, P: Provider<'a>> {
     word: &'a str,
     iter: PIter<'a, P::WordIter, P::WordFilteredIter>,
-    threshold: f64,
+    threshold: f32,
     algo: Algorithm,
 }
 impl<'a, P: Provider<'a>> Iterator for ProximateWordIter<'a, P> {
     type Item = (&'a AlphanumRef, f32);
     fn next(&mut self) -> Option<Self::Item> {
-        for other_word in &mut self.iter {
-            let other_len = other_word.chars().count();
-            let len_diff = other_len.checked_sub(self.word.len());
-            if let Some(len_diff) = len_diff {
-                if other_word
-                    .chars()
-                    .take(self.word.len())
-                    .eq(self.word.chars())
-                {
-                    #[allow(clippy::cast_precision_loss)]
-                    let similarity = (1.0 / ((0.1 * len_diff as f32) + 0.5)) - 1.0;
-                    return Some((other_word, similarity));
+        let iter = &mut self.iter;
+        if self.word.len() < 3 {
+            for other_word in iter {
+                #[allow(clippy::cast_possible_truncation)]
+                let similarity = self.algo.similarity(other_word.chars(), self.word.chars()) as f32;
+
+                if similarity > self.threshold {
+                    #[allow(clippy::cast_possible_truncation)]
+                    return Some((other_word, similarity as f32));
                 }
             }
+        } else {
+            for other_word in iter {
+                // Starts with
+                let other_len = other_word.chars().count();
+                let len_diff = other_len.checked_sub(self.word.len());
+                if let Some(len_diff) = len_diff {
+                    if other_word
+                        .chars()
+                        .take(self.word.len())
+                        .eq(self.word.chars())
+                    {
+                        if len_diff == 0 {
+                            return Some((other_word, 1.0));
+                        }
+                        #[allow(clippy::cast_precision_loss)]
+                        return Some((other_word, 1.0 / ((0.05 * len_diff as f32) + 0.5) - 1.2));
+                    }
+                }
 
-            let similarity = self.algo.similarity(other_word.chars(), self.word.chars());
-
-            if similarity > self.threshold {
+                // Similarity
                 #[allow(clippy::cast_possible_truncation)]
-                return Some((other_word, similarity as f32));
+                let similarity = self.algo.similarity(other_word.chars(), self.word.chars()) as f32;
+
+                if similarity >= self.threshold {
+                    return Some((other_word, similarity));
+                }
             }
         }
         None
