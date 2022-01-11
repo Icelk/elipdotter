@@ -188,12 +188,12 @@ impl Display for Part {
 }
 
 #[derive(Debug)]
-pub struct Documents<'a, P: Provider<'a>> {
-    proximate_map: ProximateMap<'a>,
-    query: &'a Query,
+pub struct Documents<'a, 'b, P: Provider<'a>> {
+    proximate_map: ProximateMap<'b>,
+    query: &'b Query,
     provider: &'a P,
 }
-impl<'a, P: Provider<'a>> Documents<'a, P> {
+impl<'a, 'b, P: Provider<'a>> Documents<'a, 'b, P> {
     /// # Errors
     ///
     /// If a [`Part::Not`] isn't associated with a [`Part::And`], [`IterError::StrayNot`] is
@@ -217,8 +217,8 @@ impl<'a, P: Provider<'a>> Documents<'a, P> {
             &set::intersect,
         )
     }
-    pub fn into_proximate_map(self) -> ProximateMap<'a> {
-        self.proximate_map
+    pub fn take_proximate_map(&mut self) -> ProximateMap<'b> {
+        std::mem::take(&mut self.proximate_map)
     }
 }
 
@@ -231,8 +231,7 @@ impl Query {
     fn new(root: Part) -> Self {
         Self { root }
     }
-    pub fn documents<'a, P: Provider<'a>>(&'a self, provider: &'a P) -> Documents<'a, P> {
-        let now = std::time::Instant::now();
+    pub fn documents<'a, 'b, P: Provider<'a>>(&'b self, provider: &'a P) -> Documents<'a, 'b, P> {
         let mut proximate_map = proximity::ProximateMap::new();
         if let proximity::Algorithm::Exact = provider.word_proximity_algorithm() {
             // Do nothing, it doesn't read this.

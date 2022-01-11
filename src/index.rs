@@ -345,8 +345,8 @@ pub fn next_char(c: char) -> char {
 /// Allows to insert words and remove occurrences from documents.
 pub trait Provider<'a> {
     type DocumentIter: Iterator<Item = Id> + ExactSizeIterator + 'a;
-    type WordIter: Iterator<Item = &'a AlphanumRef> + 'a;
-    type WordFilteredIter: Iterator<Item = &'a AlphanumRef> + 'a;
+    type WordIter: Iterator<Item = &'a Arc<AlphanumRef>> + 'a;
+    type WordFilteredIter: Iterator<Item = &'a Arc<AlphanumRef>> + 'a;
 
     fn insert_word(&mut self, word: impl AsRef<str>, document: Id);
     fn remove_document(&mut self, document: Id);
@@ -421,7 +421,7 @@ impl Default for SimpleDocRef {
 #[derive(Debug)]
 #[must_use]
 pub struct Simple {
-    words: BTreeMap<AlphanumRef, SimpleDocRef>,
+    words: BTreeMap<Arc<AlphanumRef>, SimpleDocRef>,
 
     proximity_threshold: f32,
     proximity_algo: proximity::Algorithm,
@@ -468,11 +468,14 @@ impl Default for Simple {
         Self::new(0.85, proximity::Algorithm::Hamming, 2_500)
     }
 }
-type FirstTy<'a> = fn((&'a AlphanumRef, &'a SimpleDocRef)) -> &'a AlphanumRef;
+type FirstTy<'a, T, I> = fn((&'a T, &'a I)) -> &'a T;
 impl<'a> Provider<'a> for Simple {
     type DocumentIter = Copied<btree_set::Iter<'a, Id>>;
-    type WordIter = btree_map::Keys<'a, AlphanumRef, SimpleDocRef>;
-    type WordFilteredIter = Map<btree_map::Range<'a, AlphanumRef, SimpleDocRef>, FirstTy<'a>>;
+    type WordIter = btree_map::Keys<'a, Arc<AlphanumRef>, SimpleDocRef>;
+    type WordFilteredIter = Map<
+        btree_map::Range<'a, Arc<AlphanumRef>, SimpleDocRef>,
+        FirstTy<'a, Arc<AlphanumRef>, SimpleDocRef>,
+    >;
 
     /// O(log n log n)
     fn insert_word(&mut self, word: impl AsRef<str>, document: Id) {
@@ -486,7 +489,7 @@ impl<'a> Provider<'a> for Simple {
             doc_ref.insert(document);
             let word = Alphanumeral::new(word).chars().collect::<String>();
             let ptr = StrPtr::owned(word);
-            self.words.insert(Alphanumeral::new(ptr), doc_ref);
+            self.words.insert(Arc::new(Alphanumeral::new(ptr)), doc_ref);
         }
     }
     /// O(n log n)
@@ -534,7 +537,7 @@ impl<'a> Provider<'a> for Simple {
 
         self.words
             .range(Alphanumeral::new(ptr1)..Alphanumeral::new(ptr2))
-            .map(|(k, _v)| k)
+            .map::<&Arc<AlphanumRef>, _>(|(k, _v)| k)
     }
 
     fn word_proximity_threshold(&self) -> f32 {
@@ -580,7 +583,7 @@ impl<'a> Iterator for SplitNonAlphanumeric<'a> {
 #[derive(Debug)]
 enum ProximateListOrSingle<'a> {
     Single(&'a str),
-    List(&'a proximity::ProximateList<'a>),
+    List(&'a proximity::ProximateList),
 }
 impl<'a> ProximateListOrSingle<'a> {
     #[allow(clippy::inline_always)]
@@ -736,8 +739,8 @@ impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
             Some(SimpleOccurrencesIter::new(
                 Box::new(
                     self.index
-                        .documents_with_word(word_ptr)?
-                        .map(move |id| (id, word_ptr, 1.0)),
+                        .documents_with_word(&**word_ptr)?
+                        .map(move |id| (id, &**word_ptr, 1.0)),
                 ),
                 ProximateListOrSingle::Single(word),
                 &self.document_contents,
