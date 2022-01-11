@@ -209,8 +209,13 @@ impl<'a, 'b, P: Provider<'a>> Documents<'a, 'b, P> {
             } else {
                 Part::fn_to_box(|s| {
                     let list = self.proximate_map.get_panic(s);
-                    Some(proximity::proximate_word_docs(self.provider, list).map(|item| item.id))
-                        .map(Part::iter_to_box)
+                    Some(
+                        proximity::proximate_word_docs(self.provider, list)
+                            .map(|item| item.id)
+                            .collect::<BTreeSet<_>>()
+                            .into_iter(),
+                    )
+                    .map(Part::iter_to_box)
                 })
             },
             &|i, _| i,
