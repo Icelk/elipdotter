@@ -852,7 +852,6 @@ pub mod parse {
     /// Same as [`char::is_ascii_whitespace`], but including `\u{a0}`, non-breaking space.
     #[must_use]
     pub fn is_whitespace(c: char) -> bool {
-        if c == '\u{a0}' {}
         c.is_ascii_whitespace() || c == '\u{a0}'
     }
 
