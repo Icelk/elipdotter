@@ -15,7 +15,7 @@ you can easily use this search engine in your [Kvarn web server](https://kvarn.o
 See the [source of `kvarn-search`](https://github.com/Icelk/kvarn-search/tree/main/src/)
 for a comprehensive example.
 
-The [tests of this crate](Vhttps://github.com/Icelk/elipdotter/tree/main/tests/)
+The [tests of this crate](https://github.com/Icelk/elipdotter/tree/main/tests/)
 contain minimal examples.
 
 # License
