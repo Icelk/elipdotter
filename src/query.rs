@@ -203,7 +203,7 @@ impl<'a, 'b, P: Provider<'a>> Documents<'a, 'b, P> {
     /// and almost all other search engines.
     #[allow(clippy::iter_not_returning_iterator)] // it does, within a result
     pub fn iter(&'a self) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
-        self.query.root.as_doc_iter(
+        self.query.root().as_doc_iter(
             if let proximity::Algorithm::Exact = self.provider.word_proximity_algorithm() {
                 Part::fn_to_box(|s| self.provider.documents_with_word(s).map(Part::iter_to_box))
             } else {
@@ -236,12 +236,16 @@ impl Query {
     fn new(root: Part) -> Self {
         Self { root }
     }
+    /// Get a reference to the root node of the query.
+    pub fn root(&self) -> &Part {
+        &self.root
+    }
     pub fn documents<'a, 'b, P: Provider<'a>>(&'b self, provider: &'a P) -> Documents<'a, 'b, P> {
         let mut proximate_map = proximity::ProximateMap::new();
         if let proximity::Algorithm::Exact = provider.word_proximity_algorithm() {
             // Do nothing, it doesn't read this.
         } else {
-            self.root.for_each_string(&mut |s| {
+            self.root().for_each_string(&mut |s| {
                 proximity::proximate_words(s, provider).extend_proximates(&mut proximate_map);
             });
         }
@@ -395,7 +399,7 @@ impl Query {
             }
         }
 
-        self.root
+        self.root()
             .as_doc_iter(
                 &mut move |s| {
                     provider.occurrences_of_word(s).map(|iter| {
