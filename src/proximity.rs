@@ -1,3 +1,4 @@
+use std::collections::{btree_map, BTreeMap};
 use std::fmt::Debug;
 
 use crate::index::{AlphanumRef, Alphanumeral, Id, Provider};
@@ -47,6 +48,59 @@ impl Algorithm {
     }
 }
 
+#[derive(Debug, Clone)]
+#[must_use]
+pub struct ProximateList<'a> {
+    pub(crate) words: BTreeMap<&'a AlphanumRef, f32>,
+}
+/// Map of words to their [`ProximateList`].
+#[derive(Debug, Clone)]
+#[must_use]
+pub struct ProximateMap<'a> {
+    pub(crate) map: BTreeMap<&'a str, ProximateList<'a>>,
+}
+impl<'a> ProximateMap<'a> {
+    pub fn new() -> Self {
+        Self {
+            map: BTreeMap::new(),
+        }
+    }
+    pub(crate) fn get_panic(&'a self, word: &str) -> &'a ProximateList<'a> {
+        fn panic_missing_proximate_words(word: &str) -> ! {
+            panic!("Missing proximate words when iterating over occurrences of word {}. Check you are passing the correct `proximity::ProximateMap`.", word)
+        }
+
+        if let Some(s) = self.map.get(word) {
+            s
+        } else {
+            panic_missing_proximate_words(word)
+        }
+    }
+}
+impl<'a> Default for ProximateMap<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, PartialEq, PartialOrd)]
+#[must_use]
+pub struct ProximateWordItem<'a> {
+    pub word: &'a AlphanumRef,
+    pub rating: f32,
+}
+impl<'a> ProximateWordItem<'a> {
+    pub fn new(item: (&'a AlphanumRef, f32)) -> Self {
+        Self {
+            word: item.0,
+            rating: item.1,
+        }
+    }
+    #[must_use]
+    pub fn into_parts(self) -> (&'a AlphanumRef, f32) {
+        (self.word, self.rating)
+    }
+}
 #[derive(Debug)]
 pub struct ProximateWordIter<'a, P: Provider<'a>> {
     word: &'a str,
@@ -54,8 +108,18 @@ pub struct ProximateWordIter<'a, P: Provider<'a>> {
     threshold: f32,
     algo: Algorithm,
 }
+impl<'a, P: Provider<'a>> ProximateWordIter<'a, P> {
+    pub fn extend_proximates(self, proximates: &mut ProximateMap<'a>) {
+        proximates.map.insert(
+            self.word,
+            ProximateList {
+                words: self.map(|item| (item.word, item.rating)).collect(),
+            },
+        );
+    }
+}
 impl<'a, P: Provider<'a>> Iterator for ProximateWordIter<'a, P> {
-    type Item = (&'a AlphanumRef, f32);
+    type Item = ProximateWordItem<'a>;
     fn next(&mut self) -> Option<Self::Item> {
         let iter = &mut self.iter;
         if self.word.len() < 3 {
@@ -65,7 +129,7 @@ impl<'a, P: Provider<'a>> Iterator for ProximateWordIter<'a, P> {
 
                 if similarity > self.threshold {
                     #[allow(clippy::cast_possible_truncation)]
-                    return Some((other_word, similarity as f32));
+                    return Some(ProximateWordItem::new((other_word, similarity as f32)));
                 }
             }
         } else {
@@ -80,10 +144,13 @@ impl<'a, P: Provider<'a>> Iterator for ProximateWordIter<'a, P> {
                         .eq(self.word.chars())
                     {
                         if len_diff == 0 {
-                            return Some((other_word, 1.0));
+                            return Some(ProximateWordItem::new((other_word, 1.0)));
                         }
                         #[allow(clippy::cast_precision_loss)]
-                        return Some((other_word, 1.0 / ((0.05 * len_diff as f32) + 0.5) - 1.2));
+                        return Some(ProximateWordItem::new((
+                            other_word,
+                            1.0 / ((0.05 * len_diff as f32) + 0.5) - 1.2,
+                        )));
                     }
                 }
 
@@ -92,7 +159,7 @@ impl<'a, P: Provider<'a>> Iterator for ProximateWordIter<'a, P> {
                 let similarity = self.algo.similarity(other_word.chars(), self.word.chars()) as f32;
 
                 if similarity >= self.threshold {
-                    return Some((other_word, similarity));
+                    return Some(ProximateWordItem::new((other_word, similarity)));
                 }
             }
         }
@@ -129,9 +196,9 @@ pub fn proximate_words<'a, P: Provider<'a>>(
 #[derive(Debug)]
 #[must_use]
 pub struct ProximateDocItem<'a> {
-    id: Id,
-    word: &'a AlphanumRef,
-    rating: f32,
+    pub id: Id,
+    pub word: &'a AlphanumRef,
+    pub rating: f32,
 }
 impl<'a> PartialEq for ProximateDocItem<'a> {
     fn eq(&self, other: &Self) -> bool {
@@ -163,8 +230,11 @@ impl<'a> ProximateDocItem<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct ProximateDocIter<'a, P: Provider<'a>> {
-    word_iter: ProximateWordIter<'a, P>,
+    // word_iter: ProximateWordIter<'a, 'b, P>,
+    word_iter: btree_map::Iter<'a, &'a AlphanumRef, f32>,
+    // words: &'a WordProximates<'a>,
     provider: &'a P,
     current: Option<(&'a AlphanumRef, P::DocumentIter, f32)>,
     // Why BTreeSet? Well, faster on small lists, as hashing takes a long time
@@ -175,20 +245,20 @@ pub struct ProximateDocIter<'a, P: Provider<'a>> {
     // Refactoring?
     // accepted_words: BTreeSet<&'a AlphanumRef>,
 }
-impl<'a, P: Provider<'a> + Debug> Debug for ProximateDocIter<'a, P>
-where
-    P::DocumentIter: Debug,
-    P::WordIter: Debug,
-    P::WordFilteredIter: Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ProximateDocIter")
-            .field("word_iter", &self.word_iter)
-            .field("provider", &self.provider)
-            .field("current", &self.current)
-            .finish()
-    }
-}
+// impl<'a, P: Provider<'a> + Debug> Debug for ProximateDocIter<'a, P>
+// where
+// P::DocumentIter: Debug,
+// P::WordIter: Debug,
+// P::WordFilteredIter: Debug,
+// {
+// fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+// f.debug_struct("ProximateDocIter")
+// .field("words", &self.words)
+// .field("provider", &self.provider)
+// .field("current", &self.current)
+// .finish()
+// }
+// }
 // impl<'a, P: Provider<'a>> ProximateDocIter<'a, P> {
 // pub(crate) fn accepted_words(&self) -> &BTreeSet<&'a AlphanumRef> {
 // &self.accepted_words
@@ -198,11 +268,11 @@ where
 // }
 // }
 impl<'a, P: Provider<'a>> Iterator for ProximateDocIter<'a, P> {
-    type Item = (Id, &'a AlphanumRef, f32);
+    type Item = ProximateDocItem<'a>;
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((word, doc_iter, proximity)) = &mut self.current {
             if let Some(doc) = doc_iter.next() {
-                Some((doc, word, *proximity))
+                Some(ProximateDocItem::new((doc, word, *proximity)))
             } else {
                 self.current = None;
                 self.next()
@@ -211,7 +281,7 @@ impl<'a, P: Provider<'a>> Iterator for ProximateDocIter<'a, P> {
             self.current = self
                 .provider
                 .documents_with_word(next_word)
-                .map(|iter| (next_word, iter, proximity));
+                .map(|iter| (*next_word, iter, *proximity));
             // self.accepted_words.insert(next_word);
             self.next()
         } else {
@@ -225,11 +295,13 @@ impl<'a, P: Provider<'a>> Iterator for ProximateDocIter<'a, P> {
 /// `ProximateDocItem`, then collect it in a [`BTreeSet`], then [`IntoIterator::into_iter`] and map
 /// again.
 pub fn proximate_word_docs<'a, P: Provider<'a>>(
-    word: &'a str,
     provider: &'a P,
+    words: &'a ProximateList<'a>,
 ) -> ProximateDocIter<'a, P> {
     ProximateDocIter {
-        word_iter: proximate_words(word, provider),
+        // word_iter: proximate_words(word, provider),
+        word_iter: words.words.iter(),
+        // words: word_proximates,
         current: None,
         provider,
         // accepted_words: BTreeSet::new(),

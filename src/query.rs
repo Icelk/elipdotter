@@ -2,8 +2,9 @@ use std::collections::BTreeSet;
 use std::fmt::{self, Debug, Display};
 use std::iter::Peekable;
 
-use crate::index::Occurence;
 use crate::index::{self, AssociatedOccurrence};
+use crate::index::{Occurence, Provider};
+use crate::proximity::ProximateMap;
 use crate::{proximity, set};
 pub use parse::{parse, Options as ParseOptions};
 
@@ -65,6 +66,28 @@ impl Part {
         Self::Not(Box::new(not.into()))
     }
 
+    pub fn for_each<'a>(&'a self, f: &mut impl FnMut(&'a Part)) {
+        f(self);
+        match self {
+            Self::And(pair) | Self::Or(pair) => {
+                pair.left.for_each(f);
+                pair.right.for_each(f);
+            }
+            Self::Not(not) => not.for_each(f),
+            Self::String(_s) => {}
+        }
+    }
+    pub fn for_each_string<'a>(&'a self, f: &mut impl FnMut(&'a str)) {
+        match self {
+            Self::And(pair) | Self::Or(pair) => {
+                pair.left.for_each_string(f);
+                pair.right.for_each_string(f);
+            }
+            Self::Not(not) => not.for_each_string(f),
+            Self::String(s) => f(s),
+        }
+    }
+
     /// Tests the equality of the parts AND order.
     ///
     /// See [`BinaryPart`] for more details.
@@ -99,11 +122,11 @@ impl Part {
     ) -> Box<(dyn FnMut(&'a str) -> Option<Box<dyn Iterator<Item = T> + 'a>> + 'a)> {
         Box::new(f)
     }
-    fn as_doc_iter<'a, T: Ord + 'a, AndMI: Iterator<Item = T> + 'a>(
+    fn as_doc_iter<'a, 'b, T: Ord + 'a, AndMI: Iterator<Item = T> + 'a>(
         &'a self,
         mut iter: impl std::ops::DerefMut<
-            Target = (impl FnMut(&'a str) -> Option<Box<dyn Iterator<Item = T> + 'a>> + ?Sized + 'a),
-        >,
+                Target = (impl FnMut(&'a str) -> Option<Box<dyn Iterator<Item = T> + 'a>> + ?Sized + 'a),
+            > + 'b,
         and_not_modify: &impl Fn(
             Box<dyn Iterator<Item = T> + 'a>,
             Box<dyn Iterator<Item = T> + 'a>,
@@ -115,14 +138,10 @@ impl Part {
     ) -> Result<Box<dyn Iterator<Item = T> + 'a>, IterError> {
         let iter = match self {
             Self::And(pair) => match (&pair.left, &pair.right) {
-                (other, Part::Not(not)) | (Part::Not(not), other) =>
-                // set::difference(other.as_doc_iter(iter, and_not_modify)?, not.as_doc_iter(iter, and_not_modify)?),
-                {
-                    and_not_modify(
-                        other.as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
-                        not.as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
-                    )
-                }
+                (other, Part::Not(not)) | (Part::Not(not), other) => and_not_modify(
+                    other.as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
+                    not.as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
+                ),
                 _ => Self::iter_to_box(and_merger(
                     pair.left
                         .as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
@@ -168,6 +187,41 @@ impl Display for Part {
     }
 }
 
+#[derive(Debug)]
+pub struct Documents<'a, P: Provider<'a>> {
+    proximate_map: ProximateMap<'a>,
+    query: &'a Query,
+    provider: &'a P,
+}
+impl<'a, P: Provider<'a>> Documents<'a, P> {
+    /// # Errors
+    ///
+    /// If a [`Part::Not`] isn't associated with a [`Part::And`], [`IterError::StrayNot`] is
+    /// returned.
+    ///
+    /// This is due to a limitation of the index architecture used by this library,
+    /// and almost all other search engines.
+    #[allow(clippy::iter_not_returning_iterator)] // it does, within a result
+    pub fn iter(&'a self) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
+        self.query.root.as_doc_iter(
+            if let proximity::Algorithm::Exact = self.provider.word_proximity_algorithm() {
+                Part::fn_to_box(|s| self.provider.documents_with_word(s).map(Part::iter_to_box))
+            } else {
+                Part::fn_to_box(|s| {
+                    let list = self.proximate_map.get_panic(s);
+                    Some(proximity::proximate_word_docs(self.provider, list).map(|item| item.id))
+                        .map(Part::iter_to_box)
+                })
+            },
+            &|i, _| i,
+            &set::intersect,
+        )
+    }
+    pub fn into_proximate_map(self) -> ProximateMap<'a> {
+        self.proximate_map
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[must_use]
 pub struct Query {
@@ -177,54 +231,21 @@ impl Query {
     fn new(root: Part) -> Self {
         Self { root }
     }
-    /// # Errors
-    ///
-    /// If a [`Part::Not`] isn't associated with a [`Part::And`], [`IterError::StrayNot`] is
-    /// returned.
-    ///
-    /// This is due to a limitation of the index architecture used by this library,
-    /// and almost all other search engines.
-    pub fn documents<'a>(
-        &'a self,
-        provider: &'a impl index::Provider<'a>,
-    ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
-        self.root.as_doc_iter(
-            if let proximity::Algorithm::Exact = provider.word_proximity_algorithm() {
-                Part::fn_to_box(|s| provider.documents_with_word(s).map(Part::iter_to_box))
-            } else {
-                Part::fn_to_box(|s| {
-                    Some(
-                        proximity::proximate_word_docs(s, provider)
-                            .map(|(id, _, _)| id)
-                            .collect::<BTreeSet<_>>()
-                            .into_iter(),
-                    )
-                    .map(Part::iter_to_box)
-                })
-            },
-            &|i, _| i,
-            &set::intersect,
-        )
-    }
-    /// DO NOT USE THIS TO GET THE DOCS TO PASS TO [`Self::occurences`].
-    ///
-    /// Same as [`Self::documents`], but with AND NOT queries, it actually rejects all documents
-    /// which has any `b`.
-    ///
-    /// This also does not get docs for proximate words.
-    ///
-    /// # Errors
-    ///
-    /// See [`Self::documents`].
-    pub fn documents_conservative<'a>(
-        &'a self,
-        provider: &'a impl index::Provider<'a>,
-    ) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
-        self.root.as_doc_iter(
-            &mut |s| provider.documents_with_word(s).map(Part::iter_to_box),
-            &|a, b| Part::iter_to_box(set::difference(a, b)),
-            &set::intersect,
-        )
+    pub fn documents<'a, P: Provider<'a>>(&'a self, provider: &'a P) -> Documents<'a, P> {
+        let now = std::time::Instant::now();
+        let mut proximate_map = proximity::ProximateMap::new();
+        if let proximity::Algorithm::Exact = provider.word_proximity_algorithm() {
+            // Do nothing, it doesn't read this.
+        } else {
+            self.root.for_each_string(&mut |s| {
+                proximity::proximate_words(s, provider).extend_proximates(&mut proximate_map);
+            });
+        }
+        Documents {
+            proximate_map,
+            query: self,
+            provider,
+        }
     }
     /// The `distance_threshold` is the bytes between two occurrences to consider the "same", which
     /// increases [`Hit::rating`].
@@ -832,8 +853,7 @@ pub mod parse {
     /// Same as [`char::is_ascii_whitespace`], but including `\u{a0}`, non-breaking space.
     #[must_use]
     pub fn is_whitespace(c: char) -> bool {
-        if c == '\u{a0}' {
-        }
+        if c == '\u{a0}' {}
         c.is_ascii_whitespace() || c == '\u{a0}'
     }
 

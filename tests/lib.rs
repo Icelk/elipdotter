@@ -1,6 +1,7 @@
+use elipdotter::proximity::ProximateMap;
+use elipdotter::*;
 use index::{DocumentMap, Simple, SimpleOccurences};
 use query::Query;
-use search::*;
 
 /// Parses `s` with [`ParseOptions::default`].
 fn pq(s: &str) -> Query {
@@ -31,8 +32,12 @@ fn docs() -> (DocumentMap, Simple) {
     map.insert("doc_2", doc2(), &mut index);
     (map, index)
 }
-fn augment_simple<'a>(index: &'a Simple, map: &DocumentMap) -> SimpleOccurences<'a> {
-    let mut occurences = SimpleOccurences::new(index);
+fn augment_simple<'a>(
+    index: &'a Simple,
+    map: &DocumentMap,
+    proximate_map: &'a ProximateMap,
+) -> SimpleOccurences<'a> {
+    let mut occurences = SimpleOccurences::new(index, proximate_map);
     occurences.add_document(map.get_id("doc 1").unwrap(), doc1().to_owned().into());
     occurences.add_document(map.get_id("doc_2").unwrap(), doc2().to_owned().into());
     occurences
@@ -43,11 +48,14 @@ fn query_and() {
     let q = pq("feugiat luctus sem");
     let (map, index) = docs();
 
-    let mut docs = q.documents(&index).unwrap();
-    assert_eq!(docs.next(), Some(map.get_id("doc_2").unwrap()));
-    assert_eq!(docs.next(), None);
+    let docs = q.documents(&index);
+    let mut docs_iter = docs.iter().unwrap();
+    assert_eq!(docs_iter.next(), Some(map.get_id("doc_2").unwrap()));
+    assert_eq!(docs_iter.next(), None);
+    drop(docs_iter);
+    let proximate_map = docs.into_proximate_map();
 
-    let occ_provider = augment_simple(&index, &map);
+    let occ_provider = augment_simple(&index, &map, &proximate_map);
     let mut occurences = q.occurrences(&occ_provider, 100).unwrap();
     let next = occurences.next().unwrap();
     assert_eq!(next.id(), map.get_id("doc_2").unwrap());
@@ -56,10 +64,11 @@ fn query_and() {
 }
 #[test]
 fn query_and_not_1() {
-    let q = pq("feugiat -sem");
+    let q = pq("feugiat test -sem");
     let (_, index) = docs();
 
-    let mut docs = q.documents_conservative(&index).unwrap();
+    let docs = q.documents(&index);
+    let mut docs = docs.iter().unwrap();
     assert_eq!(docs.next(), None);
 }
 #[test]
@@ -69,14 +78,16 @@ fn query_and_not_2() {
     let q = pq("volutpat -hac");
     let (map, mut index) = docs();
 
-    let mut docs = q.documents(&index).unwrap();
+    let docs = q.documents(&index);
+    let mut docs_iter = docs.iter().unwrap();
 
-    assert_eq!(docs.next(), Some(map.get_id("doc 1").unwrap()));
+    assert_eq!(docs_iter.next(), Some(map.get_id("doc 1").unwrap()));
     // It does contain `hac`, but maybe they're far apart?
-    assert_eq!(docs.next(), Some(map.get_id("doc_2").unwrap()));
-    drop(docs);
+    assert_eq!(docs_iter.next(), Some(map.get_id("doc_2").unwrap()));
+    drop(docs_iter);
+    let proximate_map = docs.into_proximate_map();
 
-    let occ_provider = augment_simple(&index, &map);
+    let occ_provider = augment_simple(&index, &map, &proximate_map);
     let mut occurences = q.occurrences(&occ_provider, 100).unwrap();
     let next = occurences.next().unwrap();
     assert_eq!(next.id(), map.get_id("doc 1").unwrap());
@@ -98,14 +109,16 @@ fn query_and_not_3() {
     let q = pq("-hac volutpat");
     let (map, mut index) = docs();
 
-    let mut docs = q.documents(&index).unwrap();
+    let docs = q.documents(&index);
+    let mut docs_iter = docs.iter().unwrap();
 
-    assert_eq!(docs.next(), Some(map.get_id("doc 1").unwrap()));
+    assert_eq!(docs_iter.next(), Some(map.get_id("doc 1").unwrap()));
     // It does contain `hac`, but maybe they're far apart?
-    assert_eq!(docs.next(), Some(map.get_id("doc_2").unwrap()));
-    drop(docs);
+    assert_eq!(docs_iter.next(), Some(map.get_id("doc_2").unwrap()));
+    drop(docs_iter);
+    let proximate_map = docs.into_proximate_map();
 
-    let occ_provider = augment_simple(&index, &map);
+    let occ_provider = augment_simple(&index, &map, &proximate_map);
     let mut occurences = q.occurrences(&occ_provider, 100).unwrap();
     let next = occurences.next().unwrap();
     assert_eq!(next.id(), map.get_id("doc 1").unwrap());

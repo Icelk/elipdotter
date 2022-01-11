@@ -79,9 +79,13 @@ impl AssociatedOccurrence {
 #[repr(transparent)]
 pub struct Alphanumeral<T: ?Sized>(T);
 impl<T> Alphanumeral<T> {
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     pub fn new(s: T) -> Self {
         Self(s)
     }
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     pub fn owned(&self) -> Alphanumeral<T::Owned>
     where
         T: ToOwned + AsRef<str>,
@@ -95,6 +99,8 @@ impl<T: AsRef<str>> From<T> for Alphanumeral<T> {
     }
 }
 impl<T: AsRef<str>> Alphanumeral<T> {
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     pub fn chars(&self) -> impl Iterator<Item = char> + Clone + '_ {
         self.0
             .as_ref()
@@ -147,12 +153,16 @@ impl StrPtr {
     /// `s` must be valid for the lifetime of this object.
     ///
     /// If `drop` is true, we must also own `s`.
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     unsafe fn new(s: &str, drop: bool) -> Self {
         Self { s, drop }
     }
     /// # Safety
     ///
     /// `s` must be valid for the lifetime of this object.
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     unsafe fn sref<'a>(s: &'a str) -> Self
     where
         Self: 'a,
@@ -160,6 +170,8 @@ impl StrPtr {
         // Since `drop` is false, we don't care about ownership.
         Self::new(s, false)
     }
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     fn owned(s: impl Into<Box<str>>) -> Self {
         let s = std::mem::ManuallyDrop::new(s.into());
         // SAFETY: Since we have the ownership and used `ManuallyDrop`,
@@ -167,6 +179,8 @@ impl StrPtr {
         // We have to drop it, and it's valid until we do so.
         unsafe { Self::new(&*s, true) }
     }
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     fn as_mut(&self) -> *mut str {
         self.s as *mut _
     }
@@ -180,6 +194,8 @@ impl Drop for StrPtr {
     }
 }
 impl AsRef<str> for StrPtr {
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     fn as_ref(&self) -> &str {
         // SAFETY: Guaranteed by caller of [`Self::new`] that the string is valid for the lifetime
         // of this struct.
@@ -562,9 +578,32 @@ impl<'a> Iterator for SplitNonAlphanumeric<'a> {
     }
 }
 #[derive(Debug)]
+enum ProximateListOrSingle<'a> {
+    Single(&'a str),
+    List(&'a proximity::ProximateList<'a>),
+}
+impl<'a> ProximateListOrSingle<'a> {
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
+    fn get(&self, word: &AlphanumRef) -> Option<f32> {
+        match self {
+            Self::Single(single) => {
+                // SAFETY: We only use it in this scope.
+                let str_ptr = unsafe { StrPtr::sref(single) };
+                if word == &Alphanumeral::new(str_ptr) {
+                    Some(1.0)
+                } else {
+                    None
+                }
+            }
+            Self::List(list) => list.words.get(word).copied(),
+        }
+    }
+}
+#[derive(Debug)]
 pub struct SimpleOccurrencesIter<'a, I> {
     iter: I,
-    words: BTreeMap<&'a AlphanumRef, f32>,
+    words: ProximateListOrSingle<'a>,
 
     document_contents: &'a HashMap<Id, Arc<String>>,
 
@@ -577,7 +616,7 @@ pub struct SimpleOccurrencesIter<'a, I> {
 impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> SimpleOccurrencesIter<'a, I> {
     fn new(
         iter: I,
-        words: BTreeMap<&'a AlphanumRef, f32>,
+        words: ProximateListOrSingle<'a>,
         document_contents: &'a HashMap<Id, Arc<String>>,
         missing: &'a Mutex<Vec<(Id, &'a AlphanumRef)>>,
     ) -> Self {
@@ -606,7 +645,7 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> Iterator for SimpleOccu
                 }
                 if let Some(word_proximity) = self.words.get(&word_ptr) {
                     self.current_doc_matched = true;
-                    let rating = ((*proximity - 1.0) * 4.0) + ((*word_proximity - 1.0) * 4.0);
+                    let rating = ((*proximity - 1.0) * 4.0) + ((word_proximity - 1.0) * 4.0);
                     let mut occ = Occurence::new(start, *doc_id);
                     *occ.rating_mut() += rating;
                     return Some(occ);
@@ -644,6 +683,7 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> Iterator for SimpleOccu
 #[must_use]
 pub struct SimpleOccurences<'a> {
     index: &'a Simple,
+    word_proximates: &'a proximity::ProximateMap<'a>,
     document_contents: HashMap<Id, Arc<String>>,
 
     missing: Mutex<Vec<(Id, &'a AlphanumRef)>>,
@@ -657,9 +697,10 @@ pub struct SimpleOccurences<'a> {
 /// from [`Provider::documents_with_word`]. If a document doesn't exist, still [`Self::add_document`],
 /// but with an empty [`String`].
 impl<'a> SimpleOccurences<'a> {
-    pub fn new(index: &'a Simple) -> Self {
+    pub fn new(index: &'a Simple, word_proximates: &'a proximity::ProximateMap<'a>) -> Self {
         Self {
             index,
+            word_proximates,
             document_contents: HashMap::new(),
             missing: Mutex::new(Vec::new()),
         }
@@ -690,31 +731,29 @@ impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
         if let proximity::Algorithm::Exact = self.index.word_proximity_algorithm() {
             // SAFETY: We only use it in this scope.
             let ptr = unsafe { StrPtr::sref(word) };
-            let word = self.index.words.get_key_value(&Alphanumeral::new(ptr))?.0;
-            let words = [(word, 1.0)].into_iter().collect();
+            let word_ptr = self.index.words.get_key_value(&Alphanumeral::new(ptr))?.0;
 
             Some(SimpleOccurrencesIter::new(
                 Box::new(
                     self.index
-                        .documents_with_word(word)?
-                        .map(move |id| (id, word, 1.0)),
+                        .documents_with_word(word_ptr)?
+                        .map(move |id| (id, word_ptr, 1.0)),
                 ),
-                words,
+                ProximateListOrSingle::Single(word),
                 &self.document_contents,
                 &self.missing,
             ))
         } else {
-            // `TODO`: Optimize, don't use two proximate iters.
-            let words = proximity::proximate_words(word, self.index).collect();
+            let words = self.word_proximates.get_panic(word);
+
             Some(SimpleOccurrencesIter::new(
                 Box::new(
-                    crate::proximity::proximate_word_docs(word, self.index)
-                        .map(crate::proximity::ProximateDocItem::new)
+                    crate::proximity::proximate_word_docs(self.index, words)
                         .collect::<BTreeSet<_>>()
                         .into_iter()
                         .map(crate::proximity::ProximateDocItem::into_parts),
                 ),
-                words,
+                ProximateListOrSingle::List(words),
                 &self.document_contents,
                 &self.missing,
             ))
@@ -773,7 +812,7 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
     #[test]
     fn occurences() {
         let mut doc_map = DocumentMap::new();
-        let mut index = Simple::default();
+        let mut index = Simple::new(1.0, crate::proximity::Algorithm::Exact, 100);
         doc_map.insert("doc1", doc1(), &mut index);
         doc_map.insert("doc3", doc2(), &mut index);
 
@@ -782,7 +821,9 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
         assert_eq!(doc_map.get_id("doc3"), Some(Id::new(1)));
         assert_eq!(doc_map.get_id("doc2"), None);
 
-        let mut simple_provider = SimpleOccurences::new(&index);
+        let proximate_map = crate::proximity::ProximateMap::new();
+
+        let mut simple_provider = SimpleOccurences::new(&index, &proximate_map);
         simple_provider.add_document(doc_map.get_id("doc1").unwrap(), doc1().to_string().into());
         simple_provider.add_document(doc_map.get_id("doc3").unwrap(), doc2().to_string().into());
 
