@@ -8,8 +8,8 @@ description = "Embeddable full text search engine"
 readme = "README.md"
 repository = "https://github.com/Icelk/elipdotter/"
 license = "LGPL-3.0-or-later"
-keywords = []
-categories = []
+keywords = ["algorithms", "data-structures"]
+categories = ["search", "search-engine", "fulltext"]
 
 [dependencies]
 iter-set = "2.0.2"
