@@ -1,3 +1,7 @@
+[![crates.io version](https://img.shields.io/crates/v/elipdotter)](https://crates.io/crates/elipdotter)
+![lines of code](https://img.shields.io/tokei/lines/github/Icelk/elipdotter)
+![license](https://img.shields.io/github/license/Icelk/elipdotter)
+
 # Elipdotter
 
 > The forgotten daughter of Elip, inheriting it's minimalism.
