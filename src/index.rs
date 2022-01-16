@@ -648,7 +648,15 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> Iterator for SimpleOccu
                 }
                 if let Some(word_proximity) = self.words.get(&word_ptr) {
                     self.current_doc_matched = true;
-                    let rating = ((*proximity - 1.0) * 4.0) + ((word_proximity - 1.0) * 4.0);
+                    // debug_assert!(
+                    // (*proximity - word_proximity).abs() < 0.001,
+                    // "Prox {} word prox {} words {:?} word {}",
+                    // *proximity,
+                    // word_proximity,
+                    // self.words,
+                    // word
+                    // );
+                    let rating = (word_proximity - 1.0) * 4.0;
                     let mut occ = Occurence::new(start, *doc_id);
                     *occ.rating_mut() += rating;
                     return Some(occ);
@@ -751,9 +759,18 @@ impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
 
             Some(SimpleOccurrencesIter::new(
                 Box::new(
+                    // crate::set::deduplicate_by_keep_fn(
                     crate::proximity::proximate_word_docs(self.index, words)
                         .collect::<BTreeSet<_>>()
                         .into_iter()
+                        // |a, b| {
+                        // if a.rating < b.rating {
+                        // b
+                        // } else {
+                        // a
+                        // }
+                        // },
+                        // )
                         .map(crate::proximity::ProximateDocItem::into_parts),
                 ),
                 ProximateListOrSingle::List(words),

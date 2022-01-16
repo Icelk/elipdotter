@@ -5,20 +5,25 @@ pub trait Iter<T>: Iterator<Item = T> {}
 impl<T, I: Iterator<Item = T>> Iter<T> for I {}
 
 #[derive(Debug)]
-pub struct Deduplicate<T, I>
+pub struct Deduplicate<T, I, F>
 where
     I: Iterator<Item = T>,
+    F: Fn(T, T) -> T,
 {
     iter: Peekable<I>,
+    current: Option<T>,
+    chooser: F,
 }
-impl<T, I: Iter<T>> Deduplicate<T, I> {
-    fn new(iter: I) -> Self {
+impl<T, I: Iter<T>, F: Fn(T, T) -> T> Deduplicate<T, I, F> {
+    fn new(iter: I, chooser: F) -> Self {
         Self {
             iter: iter.peekable(),
+            current: None,
+            chooser,
         }
     }
 }
-impl<T: PartialEq, I: Iter<T>> Iterator for Deduplicate<T, I> {
+impl<T: PartialEq, I: Iter<T>, F: Fn(T, T) -> T> Iterator for Deduplicate<T, I, F> {
     type Item = T;
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -33,8 +38,11 @@ impl<T: PartialEq, I: Iter<T>> Iterator for Deduplicate<T, I> {
             };
 
             if &next != peeked {
-                return Some(next);
+                return Some(self.current.take().unwrap_or(next));
             }
+            // UNWRAP: The peeked value is Some.
+            let peeked = self.iter.next().unwrap();
+            self.current = Some((self.chooser)(next, peeked));
         }
     }
 }
@@ -42,8 +50,20 @@ impl<T: PartialEq, I: Iter<T>> Iterator for Deduplicate<T, I> {
 ///
 /// This works best for sorted iterators (e.g. [`std::collections::BTreeMap::iter`]) as they
 /// always have any duplicate items right after each other.
-pub fn deduplicate<T: PartialEq, I: Iter<T>>(iter: I) -> Deduplicate<T, I> {
-    Deduplicate::new(iter)
+pub fn deduplicate<T: PartialEq, I: Iter<T>>(iter: I) -> Deduplicate<T, I, fn(T, T) -> T> {
+    Deduplicate::new(iter, |a, _| a)
+}
+/// Removes consecutive duplicate items.
+///
+/// If duplicate items are detected, the `chooser` callback decides which of them to keep.
+///
+/// This works best for sorted iterators (e.g. [`std::collections::BTreeMap::iter`]) as they
+/// always have any duplicate items right after each other.
+pub fn deduplicate_by_keep_fn<T: PartialEq, I: Iter<T>, F: Fn(T, T) -> T>(
+    iter: I,
+    chooser: F,
+) -> Deduplicate<T, I, F> {
+    Deduplicate::new(iter, chooser)
 }
 
 /// Returns an iterator of the items in common between `a` and `b`.

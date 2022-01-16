@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::fmt::{self, Debug, Display};
 use std::iter::Peekable;
 
-use crate::index::{self, AssociatedOccurrence};
+use crate::index::{self, AssociatedOccurrence, Id};
 use crate::index::{Occurence, Provider};
 use crate::proximity::ProximateMap;
 use crate::{proximity, set};
@@ -203,6 +203,22 @@ impl<'a, 'b, P: Provider<'a>> Documents<'a, 'b, P> {
     /// and almost all other search engines.
     #[allow(clippy::iter_not_returning_iterator)] // it does, within a result
     pub fn iter(&'a self) -> Result<impl Iterator<Item = index::Id> + 'a, IterError> {
+        // struct IdOrd {
+        // id: Id,
+        // rating: f32,
+        // }
+        // impl PartialEq for IdOrd
+        // impl PartialOrd for IdOrd {
+        // fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        // Some(self.cmp(other))
+        // }
+        // }
+        // impl Ord for IdOrd {
+        // fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // self.id.cmp(&other.id)
+        // }
+        // }
+
         self.query.root().as_doc_iter(
             if let proximity::Algorithm::Exact = self.provider.word_proximity_algorithm() {
                 Part::fn_to_box(|s| self.provider.documents_with_word(s).map(Part::iter_to_box))
@@ -210,10 +226,20 @@ impl<'a, 'b, P: Provider<'a>> Documents<'a, 'b, P> {
                 Part::fn_to_box(|s| {
                     let list = self.proximate_map.get_panic(s);
                     Some(
-                        proximity::proximate_word_docs(self.provider, list)
+                        // crate::set::deduplicate_by_keep_fn(
+                        crate::proximity::proximate_word_docs(self.provider, list)
                             .map(|item| item.id)
                             .collect::<BTreeSet<_>>()
-                            .into_iter(),
+                            .into_iter()
+                            // |a, b| {
+                            // if a.rating < b.rating {
+                            // b
+                            // } else {
+                            // a
+                            // }
+                            // },
+                            // )
+                            // .map(|(id, _rating)| id),
                     )
                     .map(Part::iter_to_box)
                 })
