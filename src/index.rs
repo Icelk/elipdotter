@@ -611,7 +611,7 @@ pub struct SimpleOccurrencesIter<'a, I> {
     document_contents: &'a HashMap<Id, Arc<String>>,
 
     #[allow(clippy::type_complexity)] // That's not complex.
-    current: Option<(SplitNonAlphanumeric<'a>, Id, &'a AlphanumRef, f32)>,
+    current: Option<(SplitNonAlphanumeric<'a>, Id, &'a AlphanumRef)>,
     current_doc_matched: bool,
 
     missing: &'a Mutex<Vec<(Id, &'a AlphanumRef)>>,
@@ -636,7 +636,7 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> SimpleOccurrencesIter<'
 impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> Iterator for SimpleOccurrencesIter<'a, I> {
     type Item = Occurence;
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some((words_in_doc, doc_id, searching_word, proximity)) = &mut self.current {
+        if let Some((words_in_doc, doc_id, searching_word)) = &mut self.current {
             for (start, word_in_doc) in words_in_doc {
                 // SAFETY: We only use it in this scope.
                 let word_ptr = unsafe { StrPtr::sref(word_in_doc) };
@@ -648,14 +648,6 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> Iterator for SimpleOccu
                 }
                 if let Some(word_proximity) = self.words.get(&word_ptr) {
                     self.current_doc_matched = true;
-                    // debug_assert!(
-                    // (*proximity - word_proximity).abs() < 0.001,
-                    // "Prox {} word prox {} words {:?} word {}",
-                    // *proximity,
-                    // word_proximity,
-                    // self.words,
-                    // word
-                    // );
                     let rating = (word_proximity - 1.0) * 4.0;
                     let mut occ = Occurence::new(start, *doc_id);
                     *occ.rating_mut() += rating;
@@ -672,18 +664,13 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> Iterator for SimpleOccu
             }
         }
 
-        let (next_doc, word, proximity) = self.iter.next()?;
+        let (next_doc, word, _) = self.iter.next()?;
         let contents = if let Some(c) = self.document_contents.get(&next_doc) {
             c
         } else {
             return self.next();
         };
-        self.current = Some((
-            SplitNonAlphanumeric::new(contents),
-            next_doc,
-            word,
-            proximity,
-        ));
+        self.current = Some((SplitNonAlphanumeric::new(contents), next_doc, word));
         self.next()
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
