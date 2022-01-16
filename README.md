@@ -22,6 +22,13 @@ for a comprehensive example.
 The [tests of this crate](https://github.com/Icelk/elipdotter/tree/main/tests/)
 contain minimal examples.
 
+# Todo
+
+-   Remove the `.collect::<BTreeSet<_>>`s after [`proximate_words`](https://docs.rs/elipdotter/latest/elipdotter/proximity/fn.proximate_words.html)
+-   Remove the set in AND NOT queries
+-   for `next-generation`, make the whole stack (index + find occurrences) recognize `next`, `generation`, `nextgeneration`.
+    This enables alternative spellings to give matches.
+
 # License
 
 Elipdotter is licensed under the [GNU LGPLv3](COPYING).
