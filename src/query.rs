@@ -447,7 +447,7 @@ impl Query {
                     // there isn't a new one that's closer.
                     //
                     // This is because the NOT needs to persist while the ANDs go by.
-                    Part::iter_to_box(and.map(move |mut and| {
+                    Part::iter_to_box(and.map(move |mut and: OccurenceEq| {
                         // UNWRAP: It's not empty.
                         let not = get_before_closest_btreeset(&not, &and.0).unwrap();
                         if not.id() == and.0.id() {
