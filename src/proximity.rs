@@ -268,7 +268,7 @@ impl<'a, P: Provider<'a>> Iterator for ProximateDocIter<'a, P> {
 /// The output isn't ordered according to document IDs.
 ///
 /// Use [`ProximateDocItem`] and [`Iterator::collect`] to map the iterator to the
-/// `ProximateDocItem`, then collect it in a [`BTreeSet`], then [`IntoIterator::into_iter`] and map
+/// `ProximateDocItem`, then collect it in a [`BTreeSet`](std::collections::BTreeSet), then [`IntoIterator::into_iter`] and map
 /// again.
 pub fn proximate_word_docs<'a, P: Provider<'a>>(
     provider: &'a P,

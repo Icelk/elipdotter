@@ -686,7 +686,7 @@ pub struct SimpleOccurences<'a> {
 
     missing: Mutex<Vec<(Id, &'a AlphanumRef)>>,
 }
-/// Once this is used, call [`Simple::apply_missing`] to remove the missing entries found during
+/// Once this is used, call [`Self::missing`] and [`MissingOccurrences::apply`] to remove the missing entries found during
 /// the search.
 ///
 /// # Panics
