@@ -421,55 +421,6 @@ impl Query {
                     })
                 },
                 &|and, not| {
-                    // fn get_closest_btreeset<'a, K: Ord, T: Borrow<K> + Ord>(
-                    // set: &'a BTreeSet<T>,
-                    // key: &K,
-                    // ) -> (Option<&'a T>, Option<&'a T>) {
-                    // (set.range(..key).next_back(), set.range(key..).next())
-                    // }
-                    // /// Returns [`None`] when `set` is empty.
-                    // fn get_before_closest_btreeset<'a, T: Borrow<K> + Ord, K: Ord>(
-                    // set: &'a BTreeSet<T>,
-                    // key: &K,
-                    // id_cmp: impl Fn(&T, &K) -> bool,
-                    // ) -> Option<&'a T> {
-                    // let (before, after) = get_closest_btreeset(set, key);
-                    // match (before, after) {
-                    // (Some(before), Some(after)) => {
-                    // if id_cmp(after, key) {
-                    // Some(after)
-                    // } else {
-                    // Some(before)
-                    // }
-                    // }
-                    // (Some(before), None) => Some(before),
-                    // (None, Some(after)) => Some(after),
-                    // (None, None) => None,
-                    // }
-                    // }
-
-                    // let not: BTreeSet<_> = not.collect();
-
-                    // if not.is_empty() {
-                    // return and;
-                    // }
-
-                    // Part::iter_to_box(and.map(move |mut and: OccurenceEq| {
-                    // // UNWRAP: It's not empty.
-                    // let not =
-                    // get_before_closest_btreeset(&not, &and.0.id(), |a, b| a.0.id() == *b)
-                    // .unwrap();
-                    // if not.0.id() == and.0.id() {
-                    // let closest =
-                    // and.closest(&OccurenceEq::new(not.0.occurrence.clone(), 0));
-                    // // Don't really care about precision.
-                    // #[allow(clippy::cast_precision_loss)]
-                    // let rating_decrease = 1.0 / (0.0001 * closest.0 as f32 + 0.025);
-                    // *and.0.rating_mut() -= rating_decrease;
-                    // and.0.closest_not = Some(closest.1);
-                    // }
-                    // and
-                    // }));
                     Part::iter_to_box(
                         crate::set::progressive(
                             and,
@@ -479,7 +430,7 @@ impl Query {
                         )
                         .filter_map(|inclusion| match inclusion {
                             ProgressiveInclusion::Left(and) => Some(and),
-                            ProgressiveInclusion::Right(not) => None,
+                            ProgressiveInclusion::Right(_not) => None,
                             ProgressiveInclusion::Both(mut and, not) => {
                                 let closest = and.closest(&OccurenceEq::new(not.0.occurrence, 0));
                                 // Don't really care about precision.
