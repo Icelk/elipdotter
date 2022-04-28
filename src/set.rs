@@ -105,6 +105,13 @@ where
     iter_set::difference(deduplicate(a.into_iter()), deduplicate(b.into_iter()))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProgressiveInclusion<T> {
+    Left(T),
+    Both(T, T),
+    Right(T),
+}
+
 struct Progressive<
     T: Clone,
     L: Iterator<Item = T>,
@@ -146,48 +153,48 @@ impl<
         M: Fn(&T, &T) -> core::cmp::Ordering,
     > Iterator for Progressive<T, L, R, C, M>
 {
-    type Item = (T, T);
+    type Item = ProgressiveInclusion<T>;
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match (&self.l_next, &self.r_next) {
-                (Some(l), Some(r)) => match (self.matches)(l, r) {
-                    Ordering::Less => {
-                        self.next_l();
-                        continue;
-                    }
-                    Ordering::Equal => {}
-                    Ordering::Greater => {
-                        self.next_r();
-                        continue;
-                    }
-                },
-                _ => return None,
-            }
-
-            if self.r_peek.is_none() {
-                let r = Some((self.l_next.take()?, self.r_next.clone()?));
-                self.next_l();
-                return r;
-            }
-            if self.l_peek.is_none() {
-                let r = Some((self.l_next.clone()?, self.r_next.take()?));
-                self.next_r();
-                return r;
-            }
-
-            let left = self.l_next.as_ref().unwrap();
-            let right = self.r_next.as_ref().unwrap();
-            let r = Some((left.clone(), right.clone()));
-            match (self.comparison)(left, right) {
-                Ordering::Less | Ordering::Equal => {
+        match (&self.l_next, &self.r_next) {
+            (Some(l), Some(r)) => match (self.matches)(l, r) {
+                Ordering::Less => {
+                    let l = ProgressiveInclusion::Left(self.l_next.take().unwrap());
                     self.next_l();
+                    return Some(l);
                 }
+                Ordering::Equal => {}
                 Ordering::Greater => {
+                    let r = ProgressiveInclusion::Right(self.r_next.take().unwrap());
                     self.next_r();
+                    return Some(r);
                 }
-            }
-            return r;
+            },
+            _ => return None,
         }
+
+        if self.r_peek.is_none() {
+            let ret = ProgressiveInclusion::Both(self.l_next.take()?, self.r_next.clone()?);
+            self.next_l();
+            return Some(ret);
+        }
+        if self.l_peek.is_none() {
+            let ret = ProgressiveInclusion::Both(self.l_next.clone()?, self.r_next.take()?);
+            self.next_r();
+            return Some(ret);
+        }
+
+        let left = self.l_next.as_ref().unwrap();
+        let right = self.r_next.as_ref().unwrap();
+        let ret = ProgressiveInclusion::Both(left.clone(), right.clone());
+        match (self.comparison)(left, right) {
+            Ordering::Less | Ordering::Equal => {
+                self.next_l();
+            }
+            Ordering::Greater => {
+                self.next_r();
+            }
+        }
+        Some(ret)
     }
 }
 /// Like [`iter_set::classify`] but when we get two "equal" from `matches`, we let one of those
@@ -198,7 +205,7 @@ pub fn progressive<T, L, R, C, M>(
     b: R,
     comparison: C,
     matches: M,
-) -> impl Iterator<Item = (T, T)>
+) -> impl Iterator<Item = ProgressiveInclusion<T>>
 where
     T: Clone,
     L: IntoIterator<Item = T>,
