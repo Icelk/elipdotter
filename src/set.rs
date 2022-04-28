@@ -169,7 +169,7 @@ impl<
                 }
                 Ordering::Equal => {
                     self.l_next = Some(l);
-                    self.r_next = Some(r)
+                    self.r_next = Some(r);
                 }
                 Ordering::Greater => {
                     let r = ProgressiveInclusion::Right(r);
