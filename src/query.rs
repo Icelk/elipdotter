@@ -462,9 +462,7 @@ impl Query {
                         // UNWRAP: It's not empty.
                         let not = get_before_closest_btreeset(
                             &not,
-                            // &OccurenceEq(and.0.clone(), 0),
                             &and.0.id(),
-                            // |a, b| a.0.id() == b.0.id(),
                             |a, b| a.0.id() == *b,
                         )
                         .unwrap();
