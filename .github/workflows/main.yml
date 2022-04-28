@@ -1,0 +1,37 @@
+name: Continuous Integration
+
+on:
+    push:
+
+env:
+    CARGO_TERM_COLOR: always
+
+jobs:
+    check:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checking out sources
+              uses: actions/checkout@v2
+            - name: Installing Rust toolchain
+              uses: actions-rs/toolchain@v1
+              with:
+                  toolchain: stable
+            - uses: Swatinem/rust-cache@v1
+            - name: Checking formatting
+              uses: actions-rs/cargo@v1
+              with:
+                  command: fmt
+                  args: --check
+            - name: Checking lints
+              uses: actions-rs/cargo@v1
+              with:
+                  command: clippy
+                  args: --all-targets -- -D warnings
+            - name: Checking doc references
+              uses: Icelk/rustdoc-link-check@v1
+              with:
+                  private: true
+            - name: Testing project
+              uses: actions-rs/cargo@v1
+              with:
+                  command: test
