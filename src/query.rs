@@ -408,11 +408,13 @@ impl Query {
             }
         }
 
-        let mut word_id = 0;
+        let mut word_id: u32 = 0;
         self.root()
             .as_doc_iter(
                 &mut move |s| {
-                    word_id += 1;
+                    // Logic error if we wrap, but we'd need more than 4M words, and it only
+                    // results in marginally worse relevance for search results and context.
+                    word_id = word_id.wrapping_add(1);
                     provider.occurrences_of_word(s).map(move |iter| {
                         Part::iter_to_box(MergeProximate::new(
                             iter.map(move |hit| OccurenceEq::new(hit, word_id)),

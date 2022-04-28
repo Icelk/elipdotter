@@ -155,16 +155,18 @@ impl<
 {
     type Item = ProgressiveInclusion<T>;
     fn next(&mut self) -> Option<Self::Item> {
-        match (&self.l_next, &self.r_next) {
-            (Some(l), Some(r)) => match (self.matches)(l, r) {
+        match (self.l_next.take(), self.r_next.take()) {
+            (Some(l), Some(r)) => match (self.matches)(&l, &r) {
                 Ordering::Less => {
-                    let l = ProgressiveInclusion::Left(self.l_next.take().unwrap());
+                    let l = ProgressiveInclusion::Left(l);
+                    self.r_next = Some(r);
                     self.next_l();
                     return Some(l);
                 }
                 Ordering::Equal => {}
                 Ordering::Greater => {
-                    let r = ProgressiveInclusion::Right(self.r_next.take().unwrap());
+                    let r = ProgressiveInclusion::Right(r);
+                    self.l_next = Some(l);
                     self.next_r();
                     return Some(r);
                 }
@@ -183,6 +185,8 @@ impl<
             return Some(ret);
         }
 
+        // If `self.r_peek` and `self.l_peek` are both some, these must be Some. It's a logic error
+        // otherwise.
         let left = self.l_next.as_ref().unwrap();
         let right = self.r_next.as_ref().unwrap();
         let ret = ProgressiveInclusion::Both(left.clone(), right.clone());
