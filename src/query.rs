@@ -240,7 +240,7 @@ impl<'a, 'b, P: Provider<'a>> Documents<'a, 'b, P> {
 ///
 /// This is just a root [`Part`].
 ///
-/// Use [`parse`] to create one.
+/// Use [`mod@parse`] to create one.
 /// You can also use the [`std::str::FromStr`] implementation.
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[must_use]
@@ -589,7 +589,9 @@ impl Hit {
         first.into_iter().chain(self.occurrences.iter().copied())
     }
 
-    /// Must have the same [document id](id()).
+    /// Merges two [`Hit`]s, by adding the [`Hit::occurrences`] to our set.
+    ///
+    /// Must have the same [document id](Self::id()).
     fn merge(&mut self, other: &Self) {
         if self.occurrences.is_empty() {
             self.occurrences.insert((&*self).into());
