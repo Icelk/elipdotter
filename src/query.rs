@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::collections::BTreeSet;
 use std::fmt::{self, Debug, Display};
 use std::iter::Peekable;
@@ -274,41 +275,40 @@ impl Query {
         provider: &'a impl index::OccurenceProvider<'a>,
         distance_threshold: usize,
     ) -> Result<impl Iterator<Item = Hit> + 'a, IterError> {
-        #[derive(Debug)]
+        #[derive(Debug, Clone)]
         struct OccurenceEq(Hit);
         impl OccurenceEq {
-            fn new(occ: Occurence) -> Self {
-                Self(Hit {
-                    occurrence: occ,
-                    associated_occurrences: BTreeSet::new(),
-                    closest_not: None,
-                })
-            }
-            fn inner(self) -> Hit {
-                self.0
+            #[inline]
+            fn new(mut occ: Occurence, word_id: u32) -> Self {
+                occ.word_id = word_id;
+                Self(Hit::new(occ))
             }
             #[must_use]
             fn closest(&self, other: &Self) -> (usize, AssociatedOccurrence) {
                 use std::cmp::Ordering;
-                let mut closest = (usize::MAX, AssociatedOccurrence::new(0));
-                let mut a_iter = self.0.associated_occurrences().map(|c| c.start());
+                let mut closest = (usize::MAX, AssociatedOccurrence::new(0, 0));
+                let mut a_iter = self.0.occurrences();
                 // If `associated_occurrences` has len 0, use only start.
                 // Else, it'll have >=2 occurences, since the `.start()` is also taken as part of
                 // the BTreeSet.
-                let mut a = a_iter.next().unwrap_or_else(|| self.0.start());
-                let mut b_iter = other.0.associated_occurrences().map(|c| c.start());
-                let mut b = b_iter.next().unwrap_or_else(|| other.0.start());
+                let mut a = a_iter.next().unwrap_or_else(|| (&self.0).into());
+                let mut a_start = a.start();
+                let mut b_iter = other.0.occurrences();
+                let mut b = b_iter.next().unwrap_or_else(|| (&other.0).into());
+                let mut b_start = b.start();
                 let mut one_completed = false;
                 loop {
-                    let dist = if a > b { a - b } else { b - a };
-                    closest =
-                        std::cmp::min_by((dist, AssociatedOccurrence::new(b)), closest, |a, b| {
-                            a.0.cmp(&b.0)
-                        });
+                    let dist = if a_start > b_start {
+                        a_start - b_start
+                    } else {
+                        b_start - a_start
+                    };
+                    closest = std::cmp::min_by((dist, b), closest, |a, b| a.0.cmp(&b.0));
                     match a.cmp(&b) {
                         Ordering::Less => {
                             if let Some(next) = a_iter.next() {
                                 a = next;
+                                a_start = a.start();
                             } else if one_completed {
                                 break;
                             } else {
@@ -318,10 +318,11 @@ impl Query {
                         // The words are at the same place!
                         //
                         // This is technically not reachable, but the following codes makes sense.
-                        Ordering::Equal => return (0, AssociatedOccurrence::new(b)),
+                        Ordering::Equal => return (0, b),
                         Ordering::Greater => {
                             if let Some(next) = b_iter.next() {
                                 b = next;
+                                b_start = b.start();
                             } else if one_completed {
                                 break;
                             } else {
@@ -349,6 +350,16 @@ impl Query {
                 Some(self.cmp(other))
             }
         }
+        impl Borrow<Hit> for OccurenceEq {
+            fn borrow(&self) -> &Hit {
+                &self.0
+            }
+        }
+        impl Borrow<index::Id> for OccurenceEq {
+            fn borrow(&self) -> &index::Id {
+                &self.0.occurrence.document_id
+            }
+        }
 
         #[derive(Debug)]
         struct MergeProximate<I>
@@ -369,10 +380,7 @@ impl Query {
         impl<I: Iterator<Item = OccurenceEq>> Iterator for MergeProximate<I> {
             type Item = OccurenceEq;
             fn next(&mut self) -> Option<Self::Item> {
-                let mut next = match self.iter.next() {
-                    Some(next) => next,
-                    None => return None,
-                };
+                let mut next = self.iter.next()?;
 
                 let peeked = match self.iter.peek() {
                     Some(peeked) => peeked,
@@ -399,32 +407,35 @@ impl Query {
             }
         }
 
+        let mut word_id = 0;
         self.root()
             .as_doc_iter(
                 &mut move |s| {
-                    provider.occurrences_of_word(s).map(|iter| {
+                    word_id += 1;
+                    provider.occurrences_of_word(s).map(move |iter| {
                         Part::iter_to_box(MergeProximate::new(
-                            iter.map(OccurenceEq::new),
+                            iter.map(move |hit| OccurenceEq::new(hit, word_id)),
                             distance_threshold,
                         ))
                     })
                 },
                 &|and, not| {
-                    fn get_closest_btreeset<'a, T: Ord>(
+                    fn get_closest_btreeset<'a, K: Ord, T: Borrow<K> + Ord>(
                         set: &'a BTreeSet<T>,
-                        key: &T,
+                        key: &K,
                     ) -> (Option<&'a T>, Option<&'a T>) {
                         (set.range(..key).next_back(), set.range(key..).next())
                     }
                     /// Returns [`None`] when `set` is empty.
-                    fn get_before_closest_btreeset<'a>(
-                        set: &'a BTreeSet<Hit>,
-                        key: &Hit,
-                    ) -> Option<&'a Hit> {
+                    fn get_before_closest_btreeset<'a, T: Borrow<K> + Ord, K: Ord>(
+                        set: &'a BTreeSet<T>,
+                        key: &K,
+                        id_cmp: impl Fn(&T, &K) -> bool,
+                    ) -> Option<&'a T> {
                         let (before, after) = get_closest_btreeset(set, key);
                         match (before, after) {
                             (Some(before), Some(after)) => {
-                                if after.id() == key.id() {
+                                if id_cmp(after, key) {
                                     Some(after)
                                 } else {
                                     Some(before)
@@ -436,7 +447,7 @@ impl Query {
                         }
                     }
 
-                    let not: BTreeSet<_> = not.map(OccurenceEq::inner).collect();
+                    let not: BTreeSet<_> = not.collect();
 
                     if not.is_empty() {
                         return and;
@@ -449,13 +460,17 @@ impl Query {
                     // This is because the NOT needs to persist while the ANDs go by.
                     Part::iter_to_box(and.map(move |mut and: OccurenceEq| {
                         // UNWRAP: It's not empty.
-                        let not = get_before_closest_btreeset(&not, &and.0).unwrap();
-                        if not.id() == and.0.id() {
-                            let closest = and.closest(&OccurenceEq(Hit {
-                                occurrence: not.occurrence.clone(),
-                                associated_occurrences: BTreeSet::new(),
-                                closest_not: None,
-                            }));
+                        let not = get_before_closest_btreeset(
+                            &not,
+                            // &OccurenceEq(and.0.clone(), 0),
+                            &and.0.id(),
+                            // |a, b| a.0.id() == b.0.id(),
+                            |a, b| a.0.id() == *b,
+                        )
+                        .unwrap();
+                        if not.0.id() == and.0.id() {
+                            let closest =
+                                and.closest(&OccurenceEq::new(not.0.occurrence.clone(), 0));
                             // Don't really care about precision.
                             #[allow(clippy::cast_precision_loss)]
                             let rating_decrease = 1.0 / (0.0001 * closest.0 as f32 + 0.025);
@@ -466,35 +481,55 @@ impl Query {
                     }))
                 },
                 &|left, right| {
-                    iter_set::classify(left, right).filter_map(|inclusion| {
-                        if let iter_set::Inclusion::Both(mut a, b) = inclusion {
-                            a.0.merge(&b.0);
-                            Some(a)
-                        } else {
-                            None
-                        }
+                    crate::set::progressive(
+                        left,
+                        right,
+                        |a, b| a.0.start().cmp(&b.0.start()),
+                        // Compares IDs
+                        std::cmp::Ord::cmp,
+                    )
+                    .map(|(mut a, b)| {
+                        a.0.merge(&b.0);
+                        a
                     })
                 },
             )
-            .map(|iter| iter.map(OccurenceEq::inner))
             .map(|iter| {
-                iter.map(|mut occurrence| {
-                    let mut closest = usize::MAX;
-                    let mut iter = occurrence.associated_occurrences();
-                    let mut last = iter.next().unwrap_or_else(|| AssociatedOccurrence::new(0));
-                    for occ in iter {
-                        let dist = occ.start() - last.start();
-                        closest = std::cmp::min(dist, closest);
+                iter.map(|occ| {
+                    let mut occ = occ.0;
+                    let (mut closest, mut closest_index) = (usize::MAX, 0);
+                    let mut iter = occ.occurrences();
+                    let mut last = iter
+                        .next()
+                        .unwrap_or_else(|| AssociatedOccurrence::new(0, 0));
+                    for (idx, occ) in iter.enumerate() {
+                        if last.word_id() != occ.word_id() {
+                            let dist = occ.start() - last.start();
+                            if dist < closest {
+                                closest_index = idx + 1;
+                            }
+                            closest = std::cmp::min(dist, closest);
+                        }
                         last = occ;
                     }
                     if closest < usize::MAX {
                         // Don't really care about precision.
                         #[allow(clippy::cast_precision_loss)]
                         let rating_increase = 1.0 / (0.001 * closest as f32 + 0.1);
-                        *occurrence.rating_mut() += rating_increase;
+                        *occ.rating_mut() += rating_increase;
+
+                        // replace `occurrence.start()` with the closest match.
+                        // This requires removing the closest from the set and setting as "main"
+                        // and inserting "main" to the set.
+                        if closest_index != 0 {
+                            let closest = occ.occurrences().nth(closest_index - 1).unwrap();
+                            occ.occurrences.remove(&closest);
+                            occ.occurrences.insert((&occ.occurrence).into());
+                            *occ.occurrence.start_mut() = closest.start();
+                        }
                     }
 
-                    occurrence
+                    occ
                 })
             })
     }
@@ -504,51 +539,84 @@ impl Query {
 pub struct Hit {
     occurrence: Occurence,
 
-    associated_occurrences: BTreeSet<AssociatedOccurrence>,
+    /// [`Self::occurrence`] (if [`Self::merged`]) and all associated occurrences.
+    occurrences: BTreeSet<AssociatedOccurrence>,
+    /// If we have been merged. Used to tell if `self.occurrence.start()` is in the occurrences
+    /// BTree. We don't do this by default to avoid an allocation.
+    merged: bool,
 
     closest_not: Option<AssociatedOccurrence>,
 }
 impl Hit {
+    #[inline]
+    fn new(occurrence: Occurence) -> Self {
+        Self {
+            occurrence,
+            occurrences: BTreeSet::new(),
+            merged: false,
+            closest_not: None,
+        }
+    }
     /// Get a reference to the hit's document id.
     #[must_use]
+    #[inline]
     pub fn id(&self) -> index::Id {
         self.occurrence.id()
+    }
+    /// Get a reference to the hit's word id.
+    #[must_use]
+    #[inline]
+    pub fn word_id(&self) -> u32 {
+        self.occurrence.word_id()
     }
     /// Get a reference to the hit's document id.
     ///
     /// This might be any of the [`Self::associated_occurrences`] if that returns any items.
     #[must_use]
+    #[inline]
     pub fn start(&self) -> usize {
         self.occurrence.start()
     }
     /// Get a reference to the hit's occurrence.
     #[must_use]
+    #[inline]
     pub fn occurence(&self) -> &Occurence {
         &self.occurrence
     }
     /// Get the hit's rating.
     #[must_use]
+    #[inline]
     pub fn rating(&self) -> f32 {
         self.occurrence.rating()
     }
+    #[inline]
     fn rating_mut(&mut self) -> &mut f32 {
         self.occurrence.rating_mut()
     }
-    pub fn associated_occurrences(&self) -> impl Iterator<Item = AssociatedOccurrence> + '_ {
-        self.associated_occurrences.iter().copied()
+    /// [`Self::occurrence`] and all associated occurrences.
+    #[inline]
+    pub fn occurrences(&self) -> impl Iterator<Item = AssociatedOccurrence> + '_ {
+        let first = if self.merged {
+            None
+        } else {
+            Some(index::AssociatedOccurrence::new(
+                self.start(),
+                self.occurrence.word_id(),
+            ))
+        };
+        first.into_iter().chain(self.occurrences.iter().copied())
     }
 
     /// Must have the same [document id](id()).
     fn merge(&mut self, other: &Self) {
-        if self.associated_occurrences.is_empty() {
-            self.associated_occurrences
-                .insert(index::AssociatedOccurrence::new(self.start()));
+        if self.occurrences.is_empty() {
+            self.occurrences.insert((&*self).into());
         }
-        for other_occ in other.associated_occurrences() {
-            self.associated_occurrences.insert(other_occ);
+        for other_occ in other.occurrences() {
+            self.occurrences.insert(other_occ);
         }
-        self.associated_occurrences
-            .insert(index::AssociatedOccurrence::new(other.start()));
+        self.occurrences.insert(other.into());
+        self.merged = true;
     }
 }
 impl PartialEq for Hit {

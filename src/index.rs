@@ -31,14 +31,17 @@ impl Id {
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub struct Occurence {
     start: usize,
-    document_id: Id,
+    pub(crate) document_id: Id,
+    pub(crate) word_id: u32,
     rating: f32,
 }
 impl Occurence {
-    fn new(pos: usize, document_id: Id) -> Self {
+    #[inline]
+    fn new(pos: usize, document_id: Id, word_id: u32) -> Self {
         Self {
             start: pos,
             document_id,
+            word_id,
             rating: 0.0,
         }
     }
@@ -54,6 +57,11 @@ impl Occurence {
     }
     #[must_use]
     #[inline]
+    pub fn word_id(&self) -> u32 {
+        self.word_id
+    }
+    #[must_use]
+    #[inline]
     pub fn rating(&self) -> f32 {
         self.rating
     }
@@ -61,22 +69,51 @@ impl Occurence {
     pub(crate) fn rating_mut(&mut self) -> &mut f32 {
         &mut self.rating
     }
+    #[inline]
+    pub(crate) fn start_mut(&mut self) -> &mut usize {
+        &mut self.start
+    }
 }
 /// If [`Occurence`] is part of an AND, these can be associated to tell where the other parts of
 /// the AND chain are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AssociatedOccurrence {
     start: usize,
+    word_id: u32,
+}
+impl From<&crate::Hit> for AssociatedOccurrence {
+    #[inline]
+    fn from(hit: &crate::Hit) -> Self {
+        Self {
+            start: hit.start(),
+            word_id: hit.word_id(),
+        }
+    }
+}
+impl From<&Occurence> for AssociatedOccurrence {
+    #[inline]
+    fn from(occ: &Occurence) -> Self {
+        Self {
+            start: occ.start(),
+            word_id: occ.word_id(),
+        }
+    }
 }
 impl AssociatedOccurrence {
-    pub(crate) fn new(start: usize) -> Self {
-        Self { start }
+    pub(crate) fn new(start: usize, word_id: u32) -> Self {
+        Self { start, word_id }
     }
     /// Get the associated occurrence's start.
     #[must_use]
     #[inline]
     pub fn start(&self) -> usize {
         self.start
+    }
+    /// Get the associated occurrence's word id.
+    #[must_use]
+    #[inline]
+    pub fn word_id(&self) -> u32 {
+        self.word_id
     }
 }
 
@@ -654,7 +691,7 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> Iterator for SimpleOccu
                 if let Some(word_proximity) = self.words.get(&word_ptr) {
                     self.current_doc_matched = true;
                     let rating = (word_proximity - 1.0) * 4.0;
-                    let mut occ = Occurence::new(start, *doc_id);
+                    let mut occ = Occurence::new(start, *doc_id, 0);
                     *occ.rating_mut() += rating;
                     return Some(occ);
                 }
@@ -843,15 +880,15 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
         // Same problem here as above
         assert_eq!(
             occurrences.next(),
-            Some(Occurence::new(0, doc_map.get_id("doc1").unwrap()))
+            Some(Occurence::new(0, doc_map.get_id("doc1").unwrap(), 0))
         );
         assert_eq!(
             occurrences.next(),
-            Some(Occurence::new(875, doc_map.get_id("doc1").unwrap()))
+            Some(Occurence::new(875, doc_map.get_id("doc1").unwrap(), 0))
         );
         assert_eq!(
             occurrences.next(),
-            Some(Occurence::new(0, doc_map.get_id("doc3").unwrap()))
+            Some(Occurence::new(0, doc_map.get_id("doc3").unwrap(), 0))
         );
         assert_eq!(occurrences.next(), None,);
     }

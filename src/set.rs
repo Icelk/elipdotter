@@ -1,4 +1,6 @@
+use std::cmp::Ordering;
 use std::iter::Peekable;
+use std::mem;
 
 /// Convenience trait for `Iterator<Item = T> -> Iter<T>`.
 pub trait Iter<T>: Iterator<Item = T> {}
@@ -101,6 +103,121 @@ where
     R: IntoIterator<Item = T>,
 {
     iter_set::difference(deduplicate(a.into_iter()), deduplicate(b.into_iter()))
+}
+
+struct Progressive<
+    T: Clone,
+    L: Iterator<Item = T>,
+    R: Iterator<Item = T>,
+    C: Fn(&T, &T) -> core::cmp::Ordering,
+    M: Fn(&T, &T) -> core::cmp::Ordering,
+> {
+    l: L,
+    r: R,
+    matches: M,
+    comparison: C,
+    l_next: Option<T>,
+    r_next: Option<T>,
+    l_peek: Option<T>,
+    r_peek: Option<T>,
+}
+impl<
+        T: Clone,
+        L: Iterator<Item = T>,
+        R: Iterator<Item = T>,
+        C: Fn(&T, &T) -> core::cmp::Ordering,
+        M: Fn(&T, &T) -> core::cmp::Ordering,
+    > Progressive<T, L, R, C, M>
+{
+    fn next_l(&mut self) {
+        mem::swap(&mut self.l_next, &mut self.l_peek);
+        self.l_peek = self.l.next();
+    }
+    fn next_r(&mut self) {
+        mem::swap(&mut self.r_next, &mut self.r_peek);
+        self.r_peek = self.r.next();
+    }
+}
+impl<
+        T: Clone,
+        L: Iterator<Item = T>,
+        R: Iterator<Item = T>,
+        C: Fn(&T, &T) -> core::cmp::Ordering,
+        M: Fn(&T, &T) -> core::cmp::Ordering,
+    > Iterator for Progressive<T, L, R, C, M>
+{
+    type Item = (T, T);
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match (&self.l_next, &self.r_next) {
+                (Some(l), Some(r)) => match (self.matches)(l, r) {
+                    Ordering::Less => {
+                        self.next_l();
+                        continue;
+                    }
+                    Ordering::Equal => {}
+                    Ordering::Greater => {
+                        self.next_r();
+                        continue;
+                    }
+                },
+                _ => return None,
+            }
+
+            if self.r_peek.is_none() {
+                let r = Some((self.l_next.take()?, self.r_next.clone()?));
+                self.next_l();
+                return r;
+            }
+            if self.l_peek.is_none() {
+                let r = Some((self.l_next.clone()?, self.r_next.take()?));
+                self.next_r();
+                return r;
+            }
+
+            let left = self.l_next.as_ref().unwrap();
+            let right = self.r_next.as_ref().unwrap();
+            let r = Some((left.clone(), right.clone()));
+            match (self.comparison)(left, right) {
+                Ordering::Less | Ordering::Equal => {
+                    self.next_l();
+                }
+                Ordering::Greater => {
+                    self.next_r();
+                }
+            }
+            return r;
+        }
+    }
+}
+/// Like [`iter_set::classify`] but when we get two "equal" from `matches`, we let one of those
+/// stay in the "cache" to match future ones. The last one or the greatest one according to
+/// `comparison` stays.
+pub fn progressive<T, L, R, C, M>(
+    a: L,
+    b: R,
+    comparison: C,
+    matches: M,
+) -> impl Iterator<Item = (T, T)>
+where
+    T: Clone,
+    L: IntoIterator<Item = T>,
+    R: IntoIterator<Item = T>,
+    C: Fn(&T, &T) -> core::cmp::Ordering,
+    M: Fn(&T, &T) -> core::cmp::Ordering,
+{
+    let mut l = a.into_iter();
+    let mut r = b.into_iter();
+    Progressive {
+        comparison,
+        matches,
+        l_next: l.next(),
+        r_next: r.next(),
+        l_peek: l.next(),
+        r_peek: r.next(),
+        l,
+        r,
+    }
 }
 
 #[cfg(test)]
