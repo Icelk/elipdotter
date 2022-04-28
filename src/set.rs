@@ -120,8 +120,8 @@ struct Progressive<
     T: Clone,
     L: Iterator<Item = T>,
     R: Iterator<Item = T>,
-    C: Fn(&T, &T) -> core::cmp::Ordering,
-    M: Fn(&T, &T) -> core::cmp::Ordering,
+    C: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
+    M: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
 > {
     l: L,
     r: R,
@@ -136,8 +136,8 @@ impl<
         T: Clone,
         L: Iterator<Item = T>,
         R: Iterator<Item = T>,
-        C: Fn(&T, &T) -> core::cmp::Ordering,
-        M: Fn(&T, &T) -> core::cmp::Ordering,
+        C: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
+        M: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
     > Progressive<T, L, R, C, M>
 {
     fn next_l(&mut self) {
@@ -153,14 +153,14 @@ impl<
         T: Clone,
         L: Iterator<Item = T>,
         R: Iterator<Item = T>,
-        C: Fn(&T, &T) -> core::cmp::Ordering,
-        M: Fn(&T, &T) -> core::cmp::Ordering,
+        C: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
+        M: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
     > Iterator for Progressive<T, L, R, C, M>
 {
     type Item = ProgressiveInclusion<T>;
     fn next(&mut self) -> Option<Self::Item> {
         match (self.l_next.take(), self.r_next.take()) {
-            (Some(l), Some(r)) => match (self.matches)(&l, &r) {
+            (Some(mut l), Some(mut r)) => match (self.matches)(&mut l, &mut r) {
                 Ordering::Less => {
                     let l = ProgressiveInclusion::Left(l);
                     self.r_next = Some(r);
@@ -191,17 +191,15 @@ impl<
 
         // If `self.r_peek` and `self.l_peek` are both some, these must be Some. It's a logic error
         // otherwise.
-        let left = self.l_next.as_ref().unwrap();
-        let right = self.r_next.as_ref().unwrap();
+        let left = self.l_next.as_mut().unwrap();
+        let right = self.r_next.as_mut().unwrap();
+        let advance_right = (self.comparison)(left, right) == Ordering::Greater;
         let ret = ProgressiveInclusion::Both(left.clone(), right.clone());
-        match (self.comparison)(left, right) {
-            Ordering::Less | Ordering::Equal => {
-                self.next_l();
-            }
-            Ordering::Greater => {
-                self.next_r();
-            }
-        }
+        if advance_right {
+            self.next_r();
+        } else {
+            self.next_l();
+        };
         Some(ret)
     }
 }
@@ -218,8 +216,8 @@ where
     T: Clone,
     L: IntoIterator<Item = T>,
     R: IntoIterator<Item = T>,
-    C: Fn(&T, &T) -> core::cmp::Ordering,
-    M: Fn(&T, &T) -> core::cmp::Ordering,
+    C: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
+    M: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
 {
     let mut l = a.into_iter();
     let mut r = b.into_iter();
