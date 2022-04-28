@@ -43,17 +43,21 @@ impl Occurence {
         }
     }
     #[must_use]
+    #[inline]
     pub fn start(&self) -> usize {
         self.start
     }
     #[must_use]
+    #[inline]
     pub fn id(&self) -> Id {
         self.document_id
     }
     #[must_use]
+    #[inline]
     pub fn rating(&self) -> f32 {
         self.rating
     }
+    #[inline]
     pub(crate) fn rating_mut(&mut self) -> &mut f32 {
         &mut self.rating
     }
@@ -70,6 +74,7 @@ impl AssociatedOccurrence {
     }
     /// Get the associated occurrence's start.
     #[must_use]
+    #[inline]
     pub fn start(&self) -> usize {
         self.start
     }
