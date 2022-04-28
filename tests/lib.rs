@@ -48,12 +48,12 @@ fn query_and() {
     let q = pq("feugiat luctus sem");
     let (map, index) = docs();
 
-    let docs = q.documents(&index);
+    let mut docs = q.documents(&index);
     let mut docs_iter = docs.iter().unwrap();
     assert_eq!(docs_iter.next(), Some(map.get_id("doc_2").unwrap()));
     assert_eq!(docs_iter.next(), None);
     drop(docs_iter);
-    let proximate_map = docs.into_proximate_map();
+    let proximate_map = docs.take_proximate_map();
 
     let occ_provider = augment_simple(&index, &map, &proximate_map);
     let mut occurences = q.occurrences(&occ_provider, 100).unwrap();
@@ -78,14 +78,14 @@ fn query_and_not_2() {
     let q = pq("volutpat -hac");
     let (map, mut index) = docs();
 
-    let docs = q.documents(&index);
+    let mut docs = q.documents(&index);
     let mut docs_iter = docs.iter().unwrap();
 
     assert_eq!(docs_iter.next(), Some(map.get_id("doc 1").unwrap()));
     // It does contain `hac`, but maybe they're far apart?
     assert_eq!(docs_iter.next(), Some(map.get_id("doc_2").unwrap()));
     drop(docs_iter);
-    let proximate_map = docs.into_proximate_map();
+    let proximate_map = docs.take_proximate_map();
 
     let occ_provider = augment_simple(&index, &map, &proximate_map);
     let mut occurences = q.occurrences(&occ_provider, 100).unwrap();
@@ -109,14 +109,14 @@ fn query_and_not_3() {
     let q = pq("-hac volutpat");
     let (map, mut index) = docs();
 
-    let docs = q.documents(&index);
+    let mut docs = q.documents(&index);
     let mut docs_iter = docs.iter().unwrap();
 
     assert_eq!(docs_iter.next(), Some(map.get_id("doc 1").unwrap()));
     // It does contain `hac`, but maybe they're far apart?
     assert_eq!(docs_iter.next(), Some(map.get_id("doc_2").unwrap()));
     drop(docs_iter);
-    let proximate_map = docs.into_proximate_map();
+    let proximate_map = docs.take_proximate_map();
 
     let occ_provider = augment_simple(&index, &map, &proximate_map);
     let mut occurences = q.occurrences(&occ_provider, 100).unwrap();
