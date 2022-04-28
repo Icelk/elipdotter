@@ -22,6 +22,14 @@ for a comprehensive example.
 The [tests of this crate](https://github.com/Icelk/elipdotter/tree/main/tests/)
 contain minimal examples.
 
+# Changelog
+
+## v0.2.0
+
+-   Major improvements to relevancy of results, by checking more combinations of occurrences within a document. Small performance impact.
+-   Better [docs](https://doc.icelk.dev/elipdotter/elipdotter/).
+-   Fewer allocations - less memory usage.
+
 # Todo
 
 -   [ ] Remove the `.collect::<BTreeSet<_>>`s after [`proximate_words`](https://docs.rs/elipdotter/latest/elipdotter/proximity/fn.proximate_words.html)
