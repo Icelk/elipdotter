@@ -537,7 +537,7 @@ impl Hit {
     }
     /// Get a reference to the hit's document id.
     ///
-    /// This might be any of the [`Self::associated_occurrences`] if that returns any items.
+    /// This might be any of the [`Self::occurrences`] if that returns any items.
     #[must_use]
     #[inline]
     pub fn start(&self) -> usize {
@@ -546,7 +546,7 @@ impl Hit {
     /// Get a reference to the hit's occurrence.
     #[must_use]
     #[inline]
-    pub fn occurence(&self) -> &Occurence {
+    pub fn occurrence(&self) -> &Occurence {
         &self.occurrence
     }
     /// Get the hit's rating.
