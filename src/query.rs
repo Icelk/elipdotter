@@ -349,27 +349,26 @@ impl Query {
             }
         }
         impl PartialEq for OccurenceEq {
+            #[inline]
             fn eq(&self, other: &Self) -> bool {
                 self.0.id().eq(&other.0.id())
             }
         }
         impl Eq for OccurenceEq {}
         impl Ord for OccurenceEq {
+            #[inline]
             fn cmp(&self, other: &Self) -> std::cmp::Ordering {
                 self.0.id().cmp(&other.0.id())
             }
         }
         impl PartialOrd for OccurenceEq {
+            #[inline]
             fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
                 Some(self.cmp(other))
             }
         }
-        impl Borrow<Hit> for OccurenceEq {
-            fn borrow(&self) -> &Hit {
-                &self.0
-            }
-        }
         impl Borrow<index::Id> for OccurenceEq {
+            #[inline]
             fn borrow(&self) -> &index::Id {
                 &self.0.occurrence.document_id
             }
@@ -430,7 +429,10 @@ impl Query {
                     word_id = word_id.wrapping_add(1);
                     provider.occurrences_of_word(s).map(move |iter| {
                         Part::iter_to_box(MergeProximate::new(
-                            iter.map(move |hit| OccurenceEq::new(hit, word_id)),
+                            iter.map(
+                                #[inline]
+                                move |hit| OccurenceEq::new(hit, word_id),
+                            ),
                             distance_threshold,
                         ))
                     })
@@ -440,8 +442,10 @@ impl Query {
                         crate::set::progressive(
                             and,
                             not,
+                            #[inline]
                             |and, not| and.0.start().cmp(&not.0.start()),
-                            std::cmp::Ord::cmp,
+                            #[inline]
+                            |a, b| (*a).cmp(b),
                         )
                         .filter_map(|inclusion| match inclusion {
                             ProgressiveInclusion::Left(and) => Some(and),
@@ -462,9 +466,11 @@ impl Query {
                     crate::set::progressive(
                         left,
                         right,
+                        #[inline]
                         |a, b| a.0.start().cmp(&b.0.start()),
                         // Compares IDs
-                        std::cmp::Ord::cmp,
+                        #[inline]
+                        |a, b| (*a).cmp(b),
                     )
                     .filter_map(|inclusion| match inclusion {
                         ProgressiveInclusion::Both(mut a, b) => {
