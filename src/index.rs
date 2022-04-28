@@ -375,8 +375,14 @@ impl WordOccurrence {
 pub fn next_char(c: char) -> char {
     let mut int = c as u32;
     let max = char::MAX as u32;
+    // Checking the Rust source, all u32 below [`char::MAX`] and not between the range specified
+    // below are OK, so the loop here shouldn't do anything.
+    // Keeping it just in case of an API change, but since this is unicode, that's highly unlikely.
     loop {
         int += 1;
+        if (0xD800..=0xDFFF).contains(&int) {
+            int = 0xE000;
+        }
         if let Some(c) = char::from_u32(int) {
             return c;
         }
