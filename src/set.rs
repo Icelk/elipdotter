@@ -1,3 +1,7 @@
+//! Set operations on ordered iterators.
+//! These are the fundamental join operations of the search engine.
+//!
+//! These are provided by [`iter_set`], except [`progressive`], which is written by be.
 use std::cmp::Ordering;
 use std::iter::Peekable;
 use std::mem;

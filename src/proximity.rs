@@ -1,3 +1,5 @@
+//! Word similarity for typo tolerance and matching beginning of words.
+
 use std::collections::{btree_map, BTreeMap};
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -25,19 +27,24 @@ impl<'a, WI: Iterator<Item = &'a Arc<AlphanumRef>>, WFI: Iterator<Item = &'a Arc
     }
 }
 
+/// The string proximity algorithm to use.
+///
+/// See [`strsim`] for more details on these algorithms,
+/// as that's the library which provide them.
 #[derive(Debug, Clone, Copy)]
 pub enum Algorithm {
     /// about 10x as slow as [`Self::Exact`],
     /// but actually accepts similar words.
     Hamming,
-    /// 2x as slow as [`Self::Hamming`],
+    /// 2x-ish as slow as [`Self::Hamming`],
     /// but produces higher quality.
-    /// Still nothing compared to parsing of HTML.
+    /// Performance hit still nothing compared to parsing a small HTML document.
     Jaro,
     /// Only exact matches are accepted. The absolute fastest.
     Exact,
 }
 impl Algorithm {
+    /// Get the similarity between two iterators of [`char`]s.
     pub fn similarity(&self, a: impl algo::IClo, b: impl algo::IClo) -> f64 {
         match self {
             Self::Hamming => algo::hamming(a, b),
@@ -52,7 +59,13 @@ impl Algorithm {
         }
     }
 }
+impl Default for Algorithm {
+    fn default() -> Self {
+        Self::Jaro
+    }
+}
 
+/// A list of words close to the target word, and their "rating".
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct ProximateList {
@@ -88,24 +101,31 @@ impl<'a> Default for ProximateMap<'a> {
     }
 }
 
+/// An item of the [`ProximateWordIter`], returned from [`proximate_words`].
 #[derive(Debug, PartialEq, PartialOrd)]
 #[must_use]
 pub struct ProximateWordItem<'a> {
+    /// The found word.
     pub word: &'a Arc<AlphanumRef>,
+    /// The word's likeness. Higher is better.
     pub rating: f32,
 }
 impl<'a> ProximateWordItem<'a> {
+    /// Wrap a new [`ProximateWordItem`]. Works well with [`Self::into_parts`].
     pub fn new(item: (&'a Arc<AlphanumRef>, f32)) -> Self {
         Self {
             word: item.0,
             rating: item.1,
         }
     }
+    /// Turn `self` into parts. Works well with [`Self::new`].
     #[must_use]
     pub fn into_parts(self) -> (&'a Arc<AlphanumRef>, f32) {
         (self.word, self.rating)
     }
 }
+/// An iterator over the words with high likeness to the target word, as provided when running
+/// [`proximate_words`].
 #[derive(Debug)]
 pub struct ProximateWordIter<'a, 'b, P: Provider<'a>> {
     word: &'b str,
@@ -200,11 +220,16 @@ pub fn proximate_words<'a, 'b, P: Provider<'a>>(
     }
 }
 
+/// An item found by [`ProximateDocIter`], an occurrence of [`ProximateWordItem`] in any of the
+/// documents in the [`Provider`] passed to [`proximate_word_docs`].
 #[derive(Debug)]
 #[must_use]
 pub struct ProximateDocItem<'a> {
+    /// Document id
     pub id: Id,
+    /// word we found
     pub word: &'a AlphanumRef,
+    /// It's proximity compared to the original. Higher is more similar.
     pub rating: f32,
 }
 impl<'a> PartialEq for ProximateDocItem<'a> {
@@ -224,6 +249,7 @@ impl<'a> Ord for ProximateDocItem<'a> {
     }
 }
 impl<'a> ProximateDocItem<'a> {
+    /// Wrap a new [`ProximateDocItem`]. Works well with [`Self::into_parts`].
     pub fn new(item: (Id, &'a AlphanumRef, f32)) -> Self {
         Self {
             id: item.0,
@@ -231,19 +257,20 @@ impl<'a> ProximateDocItem<'a> {
             rating: item.2,
         }
     }
+    /// Turn `self` into parts. Works well with [`Self::new`].
     #[must_use]
     pub fn into_parts(self) -> (Id, &'a AlphanumRef, f32) {
         (self.id, self.word, self.rating)
     }
 }
 
+/// See [`proximate_word_docs`].
 #[derive(Debug)]
 pub struct ProximateDocIter<'a, P: Provider<'a>> {
     word_iter: btree_map::Iter<'a, Arc<AlphanumRef>, f32>,
     provider: &'a P,
     current: Option<(&'a Arc<AlphanumRef>, P::DocumentIter, f32)>,
 }
-
 impl<'a, P: Provider<'a>> Iterator for ProximateDocIter<'a, P> {
     type Item = ProximateDocItem<'a>;
     fn next(&mut self) -> Option<Self::Item> {
@@ -265,6 +292,9 @@ impl<'a, P: Provider<'a>> Iterator for ProximateDocIter<'a, P> {
         }
     }
 }
+
+/// Search for `words` in `provider`.
+///
 /// The output isn't ordered according to document IDs.
 ///
 /// Use [`ProximateDocItem`] and [`Iterator::collect`] to map the iterator to the
@@ -281,6 +311,7 @@ pub fn proximate_word_docs<'a, P: Provider<'a>>(
     }
 }
 
+/// String similarity algorithms.
 #[allow(clippy::missing_panics_doc)] // They don't happen.
 pub mod algo {
     struct IntoIterClone<I: Iterator<Item = char> + Clone>(I);
@@ -292,10 +323,11 @@ pub mod algo {
         }
     }
 
+    /// Helper trait for [`char`] [`Iterator`]s which are also [`Clone`].
     pub trait IClo: Iterator<Item = char> + Clone {}
     impl<T: Iterator<Item = char> + Clone> IClo for T {}
 
-    /// The currently used.
+    /// The currently used default.
     pub fn jaro(a: impl IClo, b: impl IClo) -> f64 {
         strsim::generic_jaro(&IntoIterClone(a), &IntoIterClone(b))
     }

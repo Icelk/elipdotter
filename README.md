@@ -7,7 +7,7 @@
 > The forgotten daughter of Elip, inheriting it's minimalism.
 
 Elipdotter is an embeddable, [rusty](https://rust-lang.org) full-text search engine, with fuzzy search and rating of results.
-It supports complex queries using `AND`, `OR`, and `NOT` operators.
+It supports complex queries using `AND`, `OR`, and `NOT` operators with parentheses.
 
 ## Kvarn integration
 
@@ -24,10 +24,10 @@ contain minimal examples.
 
 # Todo
 
--   Remove the `.collect::<BTreeSet<_>>`s after [`proximate_words`](https://docs.rs/elipdotter/latest/elipdotter/proximity/fn.proximate_words.html)
--   Remove the set in AND NOT queries
--   for `next-generation`, make the whole stack (index + find occurrences) recognize `next`, `generation`, `nextgeneration`.
-    This enables alternative spellings to give matches.
+-   [ ] Remove the `.collect::<BTreeSet<_>>`s after [`proximate_words`](https://docs.rs/elipdotter/latest/elipdotter/proximity/fn.proximate_words.html)
+-   [x] Remove the set in AND NOT queries
+-   [ ] for `next-generation`, make the whole stack (index + find occurrences) recognize `next`, `generation`, `nextgeneration`.
+        This enables alternative spellings to give matches.
 
 # License
 

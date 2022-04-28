@@ -1,3 +1,15 @@
+//! The index (lookup table of words) lives here.
+//! The trait [`Provider`] (and [`OccurenceProvider`])
+//! enables multiple types of indices to be defined.
+//!
+//! The only one (for now) is [`Simple`]. That stores a list of all the documents
+//! which contains each word in the input data (e.g. web pages). It then fetches those documents
+//! again and finds occurrences within those.
+//!
+//! ---
+//!
+//! The [`DocumentMap`] makes it performant to get the document ID from name and vice versa.
+//!
 //! # Big O notation reference
 //!
 //! `O(1) < O(log n) < O(log n * log n) < O(sqrt(n)) < O(n) < O(n * log n) < O(n^1.1) < O(n²) < O(n³) < O(2^n)`
@@ -359,6 +371,7 @@ impl Default for DocumentMap {
     }
 }
 
+/// [`Eq`] isn't implemented as you'd probably want to check which document it belongs to as well.
 #[derive(Debug, Clone)]
 pub struct WordOccurrence {
     pos: usize,
@@ -795,18 +808,9 @@ impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
 
             Some(SimpleOccurrencesIter::new(
                 Box::new(
-                    // crate::set::deduplicate_by_keep_fn(
                     crate::proximity::proximate_word_docs(self.index, words)
                         .collect::<BTreeSet<_>>()
                         .into_iter()
-                        // |a, b| {
-                        // if a.rating < b.rating {
-                        // b
-                        // } else {
-                        // a
-                        // }
-                        // },
-                        // )
                         .map(crate::proximity::ProximateDocItem::into_parts),
                 ),
                 ProximateListOrSingle::List(words),
@@ -816,6 +820,12 @@ impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
         }
     }
 }
+/// A list of missing occurrences collected when searching for occurrences using [`SimpleOccurences`].
+///
+/// This is a result of the data being changed and the index ([`Simple`]) not updating, causing it
+/// to think there should be a match when there actually isn't.
+///
+/// Please call [`Self::apply`] on this.
 #[derive(Debug)]
 pub struct MissingOccurrences {
     list: Vec<(Id, AlphanumRef)>,

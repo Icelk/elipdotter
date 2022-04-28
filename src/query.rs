@@ -1,3 +1,8 @@
+//! Query parsing and resolving.
+//!
+//! This handles AND, OR, and NOT operations, as well as parentheses which are resolved before the
+//! others.
+
 use std::borrow::Borrow;
 use std::collections::BTreeSet;
 use std::fmt::{self, Debug, Display};
@@ -45,6 +50,7 @@ impl PartialEq for BinaryPart {
 }
 impl Eq for BinaryPart {}
 
+/// A part of a [`Query`].
 #[derive(PartialEq, Eq, Clone)]
 #[must_use]
 pub enum Part {
@@ -189,6 +195,7 @@ impl Display for Part {
     }
 }
 
+/// An iterator of documents which matches a [`Query`].
 #[derive(Debug)]
 pub struct Documents<'a, 'b, P: Provider<'a>> {
     proximate_map: ProximateMap<'b>,
@@ -229,6 +236,12 @@ impl<'a, 'b, P: Provider<'a>> Documents<'a, 'b, P> {
     }
 }
 
+/// A query.
+///
+/// This is just a root [`Part`].
+///
+/// Use [`parse`] to create one.
+/// You can also use the [`std::str::FromStr`] implementation.
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[must_use]
 pub struct Query {
@@ -503,6 +516,7 @@ impl Query {
     }
 }
 
+/// An occurrence returned from [`Query`].
 #[derive(Debug, Clone)]
 pub struct Hit {
     occurrence: Occurence,
@@ -613,6 +627,7 @@ pub enum IterError {
     StrayNot,
 }
 
+/// [`Query`] parsing.
 pub mod parse {
     use std::fmt::{self, Debug, Display};
     use std::str::FromStr;
@@ -668,6 +683,7 @@ pub mod parse {
         OperationIsBinary,
     }
 
+    /// The parser. This is public to allow you to change it's state when making a [`Rule`].
     #[derive(Debug)]
     pub struct Parser {
         sub: Option<Box<Parser>>,
@@ -900,6 +916,8 @@ pub mod parse {
         c.is_ascii_whitespace() || c == '\u{a0}'
     }
 
+    /// Options to [`parse`]. Here, you can add your own formatting rules, on top of the default
+    /// rules.
     #[derive(Debug)]
     #[must_use]
     pub struct Options {
