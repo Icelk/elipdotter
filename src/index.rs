@@ -187,7 +187,8 @@ impl<T: AsRef<str>> Display for Alphanumeral<T> {
 /// We have to have the same type, so this acts as both the borrowed and owned.
 pub struct StrPtr {
     s: *const str,
-    drop: bool,
+    /// drop if it's owned
+    owned: bool,
 }
 impl StrPtr {
     /// # Safety
@@ -198,7 +199,7 @@ impl StrPtr {
     #[allow(clippy::inline_always)]
     #[inline(always)]
     unsafe fn new(s: &str, drop: bool) -> Self {
-        Self { s, drop }
+        Self { s, owned: drop }
     }
     /// # Safety
     ///
@@ -229,7 +230,7 @@ impl StrPtr {
 }
 impl Drop for StrPtr {
     fn drop(&mut self) {
-        if self.drop {
+        if self.owned {
             // SAFETY: Upheld by caller.
             unsafe { (self.as_mut()).drop_in_place() }
         }
@@ -358,7 +359,7 @@ impl Default for DocumentMap {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WordOccurrence {
     pos: usize,
 }
