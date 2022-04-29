@@ -876,7 +876,6 @@ impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
         } else {
             let words = self.word_proximates.get_panic(word);
 
-
             Some(SimpleOccurrencesIter::new(
                 Box::new(
                     crate::proximity::proximate_word_docs(self.index, words)
