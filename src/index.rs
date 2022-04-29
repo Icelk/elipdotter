@@ -129,6 +129,11 @@ impl AssociatedOccurrence {
     }
 }
 
+/// Wrapper for representing `T` as only containing alphanumeric characters.
+///
+/// The [`Eq`] and [`Ord`] implementations discard any eventual non-alphanumeric characters.
+///
+/// Can with benefits be used with [`StrPtr`].
 #[derive(Clone, Hash)]
 #[repr(transparent)]
 pub struct Alphanumeral<T: ?Sized>(T);
@@ -195,7 +200,7 @@ impl<T: AsRef<str>> Display for Alphanumeral<T> {
     }
 }
 
-/// Needed to index [custom struct](Alphanumeral) in maps.
+/// Needed to index a [custom struct](Alphanumeral) in maps.
 /// We have to have the same type, so this acts as both the borrowed and owned.
 pub struct StrPtr {
     s: *const str,
@@ -410,6 +415,9 @@ pub trait Provider<'a> {
     type WordIter: Iterator<Item = &'a Arc<AlphanumRef>> + 'a;
     type WordFilteredIter: Iterator<Item = &'a Arc<AlphanumRef>> + 'a;
 
+    /// The implementation should convert `word` to lower-case and remove any hyphen `-`.
+    ///
+    /// [`Alphanumeral`] can be used for this purpose.
     fn insert_word(&mut self, word: impl AsRef<str>, document: Id);
     fn remove_document(&mut self, document: Id);
     fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool;
@@ -427,12 +435,13 @@ pub trait Provider<'a> {
 
     /// Only adds words which are alphanumeric.
     fn digest_document(&mut self, id: Id, content: &str) {
-        for (_, word) in SplitNonAlphanumeric::new(content) {
+        for item in SplitNonAlphanumeric::new(content) {
+            let word = item.word();
             if word.is_empty() {
                 continue;
             }
             // Word must be alphanumeric to be added.
-            if word.contains(|c: char| !c.is_alphanumeric()) {
+            if word.contains(|c: char| !c.is_alphanumeric() && c != '-') {
                 continue;
             }
 
@@ -610,34 +619,92 @@ impl<'a> Provider<'a> for Simple {
     }
 }
 
+#[derive(Debug, Clone)]
+enum SplitItem<'a> {
+    /// A word was found
+    Word { word: &'a str, index: usize },
+    /// A hyphen-separated word was found.
+    /// This can be treated as **one** word and be added, which improves search results.
+    ///
+    /// Adding this makes query `nextgen` match text `next-gen`.
+    /// For some magical reason, the [`crate::proximity`] already provided query `generation`
+    /// matching for `nextgenerationnext`, even though it's in the middle of a string.
+    Hyphen {
+        /// The word with the hyphen still in it.
+        word: &'a str,
+        /// Index of the start of the word in the original string.
+        index: usize,
+    },
+}
+impl<'a> SplitItem<'a> {
+    #[inline]
+    fn word(&self) -> &'a str {
+        match self {
+            Self::Word { word, index: _ } | Self::Hyphen { word, index: _ } => word,
+        }
+    }
+    #[inline]
+    fn index(&self) -> usize {
+        match self {
+            Self::Word { word: _, index } | Self::Hyphen { word: _, index } => *index,
+        }
+    }
+}
 #[derive(Debug)]
 struct SplitNonAlphanumeric<'a> {
     s: &'a str,
     start: usize,
+    hyphen_start: usize,
+    hyphen_second_word: bool,
 }
 impl<'a> SplitNonAlphanumeric<'a> {
     fn new(s: &'a str) -> Self {
-        Self { s, start: 0 }
+        Self {
+            s,
+            start: 0,
+            hyphen_start: 0,
+            hyphen_second_word: false,
+        }
     }
 }
 impl<'a> Iterator for SplitNonAlphanumeric<'a> {
-    type Item = (usize, &'a str);
+    type Item = SplitItem<'a>;
     fn next(&mut self) -> Option<Self::Item> {
-        let mut iter = self.s.get(self.start..).unwrap().char_indices();
+        let mut iter = self.s[self.start..].char_indices();
         // Not for because we need `iter.next()` below.
         while let Some((pos, c)) = iter.next() {
             if !c.is_alphanumeric() {
+                if self.hyphen_second_word {
+                    let hyphen_word = &self.s[self.hyphen_start..self.start + pos];
+                    self.hyphen_second_word = false;
+                    // When the caller calls `next` again, we start over at the beginning of this
+                    // word, since we didn't change `self.start` before returning.
+                    return Some(SplitItem::Hyphen {
+                        word: hyphen_word,
+                        index: self.hyphen_start,
+                    });
+                }
+                if c == '-' {
+                    self.hyphen_start = self.start;
+                    self.hyphen_second_word = true;
+                }
                 let old_start = self.start;
                 self.start = self
                     .start
                     .saturating_add(iter.next().map_or(c.len_utf8(), |(pos, _)| pos));
-                return Some((old_start, self.s.get(old_start..old_start + pos).unwrap()));
+                return Some(SplitItem::Word {
+                    index: old_start,
+                    word: self.s.get(old_start..old_start + pos).unwrap(),
+                });
             }
         }
         let s = self.s.get(self.start..).unwrap();
         if !s.is_empty() {
             self.start += s.len();
-            return Some((self.start, s));
+            return Some(SplitItem::Word {
+                index: self.start,
+                word: s,
+            });
         }
         None
     }
@@ -699,7 +766,10 @@ impl<'a, I: Iterator<Item = (Id, &'a AlphanumRef, f32)>> Iterator for SimpleOccu
     type Item = Occurence;
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((words_in_doc, doc_id, searching_word)) = &mut self.current {
-            for (start, word_in_doc) in words_in_doc {
+            for item in words_in_doc {
+                let word_in_doc = item.word();
+                let start = item.index();
+
                 // SAFETY: We only use it in this scope.
                 let word_ptr = unsafe { StrPtr::sref(word_in_doc) };
                 let word_ptr = Alphanumeral::new(word_ptr);
@@ -805,6 +875,7 @@ impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
             ))
         } else {
             let words = self.word_proximates.get_panic(word);
+
 
             Some(SimpleOccurrencesIter::new(
                 Box::new(
