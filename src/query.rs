@@ -486,7 +486,7 @@ impl Query {
                         // Compares IDs
                         #[inline]
                         |a, b| (*a).cmp(b),
-                        None
+                        None,
                     )
                     .filter_map(|inclusion| match inclusion {
                         ProgressiveInclusion::Both(mut a, b) => {
