@@ -27,15 +27,9 @@ contain minimal examples.
 ## v0.2.0
 
 -   Major improvements to relevancy of results, by checking more combinations of occurrences within a document. Small performance impact.
+-   Text `next-gen` is now matched by the query `nextgen` - words with hyphens are registered as both separate words and one single.
 -   Better [docs](https://doc.icelk.dev/elipdotter/elipdotter/).
 -   Fewer allocations - less memory usage.
-
-# Todo
-
--   [ ] Remove the `.collect::<BTreeSet<_>>`s after [`proximate_words`](https://docs.rs/elipdotter/latest/elipdotter/proximity/fn.proximate_words.html)
--   [x] Remove the set in AND NOT queries
--   [x] for `next-generation`, make the whole stack (index + find occurrences) recognize `next`, `generation`, `nextgeneration`.
-        This enables alternative spellings to give matches.
 
 # License
 

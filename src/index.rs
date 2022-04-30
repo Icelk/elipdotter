@@ -441,6 +441,7 @@ pub trait Provider<'a> {
                 continue;
             }
             // Word must be alphanumeric to be added.
+            // Words with hyphens are also accepted.
             if word.contains(|c: char| !c.is_alphanumeric() && c != '-') {
                 continue;
             }
