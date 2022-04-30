@@ -130,7 +130,13 @@ impl Part {
     ) -> Box<(dyn FnMut(&'a str) -> Option<Box<dyn Iterator<Item = T> + 'a>> + 'a)> {
         Box::new(f)
     }
-    fn as_doc_iter<'a, 'b, T: Ord + 'a, AndMI: Iterator<Item = T> + 'a>(
+    fn as_doc_iter<
+        'a,
+        'b,
+        T: Ord + 'a,
+        AndMI: Iterator<Item = T> + 'a,
+        OrMI: Iterator<Item = T> + 'a,
+    >(
         &'a self,
         mut iter: impl std::ops::DerefMut<
                 Target = (impl FnMut(&'a str) -> Option<Box<dyn Iterator<Item = T> + 'a>> + ?Sized + 'a),
@@ -143,25 +149,26 @@ impl Part {
             Box<dyn Iterator<Item = T> + 'a>,
             Box<dyn Iterator<Item = T> + 'a>,
         ) -> AndMI,
+        or_merger: &impl Fn(Box<dyn Iterator<Item = T> + 'a>, Box<dyn Iterator<Item = T> + 'a>) -> OrMI,
     ) -> Result<Box<dyn Iterator<Item = T> + 'a>, IterError> {
         let iter = match self {
             Self::And(pair) => match (&pair.left, &pair.right) {
                 (other, Part::Not(not)) | (Part::Not(not), other) => and_not_modify(
-                    other.as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
-                    not.as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
+                    other.as_doc_iter(&mut *iter, and_not_modify, and_merger, or_merger)?,
+                    not.as_doc_iter(&mut *iter, and_not_modify, and_merger, or_merger)?,
                 ),
                 _ => Self::iter_to_box(and_merger(
                     pair.left
-                        .as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
+                        .as_doc_iter(&mut *iter, and_not_modify, and_merger, or_merger)?,
                     pair.right
-                        .as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
+                        .as_doc_iter(&mut *iter, and_not_modify, and_merger, or_merger)?,
                 )),
             },
-            Self::Or(pair) => Self::iter_to_box(set::union(
+            Self::Or(pair) => Self::iter_to_box(or_merger(
                 pair.left
-                    .as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
+                    .as_doc_iter(&mut *iter, and_not_modify, and_merger, or_merger)?,
                 pair.right
-                    .as_doc_iter(&mut *iter, and_not_modify, and_merger)?,
+                    .as_doc_iter(&mut *iter, and_not_modify, and_merger, or_merger)?,
             )),
             Self::Not(_) => return Err(IterError::StrayNot),
             Self::String(s) => {
@@ -229,6 +236,7 @@ impl<'a, 'b, P: Provider<'a>> Documents<'a, 'b, P> {
             },
             &|i, _| i,
             &set::intersect,
+            &set::union,
         )
     }
     pub fn take_proximate_map(&mut self) -> ProximateMap<'b> {
@@ -462,6 +470,7 @@ impl Query {
                         }),
                     )
                 },
+                // AND merger
                 &|left, right| {
                     crate::set::progressive(
                         left,
@@ -478,6 +487,25 @@ impl Query {
                             Some(a)
                         }
                         _ => None,
+                    })
+                },
+                // OR merger
+                &|left, right| {
+                    crate::set::progressive(
+                        left,
+                        right,
+                        #[inline]
+                        |a, b| a.0.start().cmp(&b.0.start()),
+                        // Compares IDs
+                        #[inline]
+                        |a, b| (*a).cmp(b),
+                    )
+                    .map(|inclusion| match inclusion {
+                        ProgressiveInclusion::Both(mut a, b) => {
+                            a.0.merge(&b.0);
+                            a
+                        }
+                        ProgressiveInclusion::Left(a) | ProgressiveInclusion::Right(a) => a,
                     })
                 },
             )
