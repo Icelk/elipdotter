@@ -1067,23 +1067,30 @@ pub mod parse {
     pub struct LiteralRule {
         literal: &'static str,
         op: Op,
+        last_was_space: bool,
     }
     impl LiteralRule {
         /// Matches the `literal` with [`Op`].
         ///
         /// Will exit if nothing was detected before and this is a binary operation.
         pub fn new(literal: &'static str, op: Op) -> Self {
-            Self { literal, op }
+            Self {
+                literal,
+                op,
+                last_was_space: true,
+            }
         }
     }
     impl Rule for LiteralRule {
         fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
             if self.op.binary() && parser.string.is_empty() && parser.left.is_none() {
+                self.last_was_space = rest.chars().next().map_or(false, is_whitespace);
                 return None;
             }
-            if rest
-                .get(0..self.literal.len())
-                .map_or(false, |rest| rest.eq_ignore_ascii_case(self.literal))
+            let rule = if self.last_was_space
+                && rest
+                    .get(0..self.literal.len())
+                    .map_or(false, |rest| rest.eq_ignore_ascii_case(self.literal))
                 && rest
                     .chars()
                     .nth(self.literal.len())
@@ -1093,7 +1100,11 @@ pub mod parse {
                 Some(self.literal.len())
             } else {
                 None
-            }
+            };
+
+            self.last_was_space = rest.chars().next().map_or(false, is_whitespace);
+
+            rule
         }
     }
 
@@ -1192,6 +1203,13 @@ mod tests {
     fn parse_plain_not() {
         let part = s("not icelk");
         assert_eq!(part, Part::not("icelk"));
+    }
+    #[test]
+    fn parse_plain_or() {
+        let p = s("or");
+        assert_eq!(p, Part::s("or"));
+        let p = s("for me");
+        assert_eq!(p, Part::and(Part::s("for"), Part::s("me")));
     }
     #[test]
     fn parse_empty() {
