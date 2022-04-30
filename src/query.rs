@@ -428,6 +428,11 @@ impl Query {
             }
         }
 
+        #[inline]
+        fn abs_diff_occurrence(a: &OccurenceEq, b: &OccurenceEq) -> usize {
+            a.0.start().abs_diff(b.0.start())
+        }
+
         let mut word_id: u32 = 0;
         self.root()
             .as_doc_iter(
@@ -454,6 +459,7 @@ impl Query {
                             |and, not| and.0.start().cmp(&not.0.start()),
                             #[inline]
                             |a, b| (*a).cmp(b),
+                            Some(abs_diff_occurrence),
                         )
                         .filter_map(|inclusion| match inclusion {
                             ProgressiveInclusion::Left(and) => Some(and),
@@ -480,6 +486,7 @@ impl Query {
                         // Compares IDs
                         #[inline]
                         |a, b| (*a).cmp(b),
+                        None
                     )
                     .filter_map(|inclusion| match inclusion {
                         ProgressiveInclusion::Both(mut a, b) => {
@@ -499,6 +506,7 @@ impl Query {
                         // Compares IDs
                         #[inline]
                         |a, b| (*a).cmp(b),
+                        None,
                     )
                     .map(|inclusion| match inclusion {
                         ProgressiveInclusion::Both(mut a, b) => {

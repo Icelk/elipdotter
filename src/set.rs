@@ -3,6 +3,7 @@
 //!
 //! These are provided by [`iter_set`], except [`progressive`], which is written by be.
 use std::cmp::Ordering;
+use std::fmt::Debug;
 use std::iter::Peekable;
 use std::mem;
 
@@ -121,12 +122,13 @@ struct Progressive<
     L: Iterator<Item = T>,
     R: Iterator<Item = T>,
     C: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
-    M: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
+    M: FnMut(&T, &T) -> core::cmp::Ordering,
 > {
     l: L,
     r: R,
     matches: M,
     comparison: C,
+    minimize_dist_right: Option<fn(&T, &T) -> usize>,
     l_next: Option<T>,
     r_next: Option<T>,
     l_peek: Option<T>,
@@ -137,7 +139,7 @@ impl<
         L: Iterator<Item = T>,
         R: Iterator<Item = T>,
         C: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
-        M: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
+        M: FnMut(&T, &T) -> core::cmp::Ordering,
     > Progressive<T, L, R, C, M>
 {
     fn next_l(&mut self) {
@@ -154,79 +156,109 @@ impl<
         L: Iterator<Item = T>,
         R: Iterator<Item = T>,
         C: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
-        M: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
+        M: FnMut(&T, &T) -> core::cmp::Ordering,
     > Iterator for Progressive<T, L, R, C, M>
 {
     type Item = ProgressiveInclusion<T>;
     fn next(&mut self) -> Option<Self::Item> {
-        match (self.l_next.take(), self.r_next.take()) {
-            (Some(mut l), Some(mut r)) => match (self.matches)(&mut l, &mut r) {
-                Ordering::Less => {
-                    let l = ProgressiveInclusion::Left(l);
-                    self.r_next = Some(r);
-                    self.next_l();
-                    return Some(l);
-                }
-                Ordering::Equal => {
-                    self.l_next = Some(l);
-                    self.r_next = Some(r);
-                }
-                Ordering::Greater => {
-                    let r = ProgressiveInclusion::Right(r);
-                    self.l_next = Some(l);
-                    self.next_r();
-                    return Some(r);
-                }
-            },
-            _ => return None,
-        }
+        loop {
+            match (self.l_next.take(), self.r_next.take()) {
+                (Some(l), Some(r)) => match (self.matches)(&l, &r) {
+                    Ordering::Less => {
+                        let l = ProgressiveInclusion::Left(l);
+                        self.r_next = Some(r);
+                        self.next_l();
+                        return Some(l);
+                    }
+                    Ordering::Equal => {
+                        self.l_next = Some(l);
+                        self.r_next = Some(r);
+                    }
+                    Ordering::Greater => {
+                        let r = ProgressiveInclusion::Right(r);
+                        self.l_next = Some(l);
+                        self.next_r();
+                        return Some(r);
+                    }
+                },
+                _ => return None,
+            }
 
-        if self.r_peek.is_none() {
-            let ret = ProgressiveInclusion::Both(self.l_next.take()?, self.r_next.clone()?);
-            self.next_l();
+            if self.r_peek.is_none() {
+                let ret = ProgressiveInclusion::Both(self.l_next.take()?, self.r_next.clone()?);
+                self.next_l();
+                return Some(ret);
+            }
+            if self.l_peek.is_none() {
+                let ret = ProgressiveInclusion::Both(self.l_next.clone()?, self.r_next.take()?);
+                self.next_r();
+                return Some(ret);
+            }
+
+            // If `self.r_peek` and `self.l_peek` are both some, these must be Some. It's a logic error
+            // otherwise.
+            let left = self.l_next.as_mut().unwrap();
+            let right = self.r_next.as_mut().unwrap();
+            let cmp = (self.comparison)(left, right);
+            let advance_right = cmp == Ordering::Greater;
+            // If dist between left and right is less on next iter, iterate right to get closer.
+            if let Some(minimize_dist_right) = self.minimize_dist_right {
+                if advance_right {
+                    let dist = minimize_dist_right(left, right);
+                    let peek_dist = if let Some(right) = &self.r_peek {
+                        if (self.matches)(left, right) == Ordering::Equal {
+                            Some(minimize_dist_right(left, right))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    // The == part of <= is really important, as we can have duplicates.
+                    if peek_dist.map_or(false, |peek_dist| peek_dist <= dist) {
+                        self.next_r();
+                        continue;
+                    }
+                }
+            }
+            let ret = ProgressiveInclusion::Both(left.clone(), right.clone());
+            if advance_right {
+                self.next_r();
+            } else {
+                self.next_l();
+            };
             return Some(ret);
         }
-        if self.l_peek.is_none() {
-            let ret = ProgressiveInclusion::Both(self.l_next.clone()?, self.r_next.take()?);
-            self.next_r();
-            return Some(ret);
-        }
-
-        // If `self.r_peek` and `self.l_peek` are both some, these must be Some. It's a logic error
-        // otherwise.
-        let left = self.l_next.as_mut().unwrap();
-        let right = self.r_next.as_mut().unwrap();
-        let advance_right = (self.comparison)(left, right) == Ordering::Greater;
-        let ret = ProgressiveInclusion::Both(left.clone(), right.clone());
-        if advance_right {
-            self.next_r();
-        } else {
-            self.next_l();
-        };
-        Some(ret)
     }
 }
 /// Like [`iter_set::classify`] but when we get two "equal" from `matches`, we let one of those
 /// stay in the "cache" to match future ones. The last one or the greatest one according to
 /// `comparison` stays.
+///
+/// If `minimize_dist_right` is [`Some`], the algorithm will only return
+/// [`ProgressiveInclusion::Both`] once `b` is close to `a` as possible.
+/// It should return the distance between the two points (using the same algorithm as `comparison`).
+/// This is very useful when doing `AND NOT` operations. Set it to [`None`] otherwise.
 pub fn progressive<T, L, R, C, M>(
     a: L,
     b: R,
     comparison: C,
     matches: M,
+    minimize_dist_right: Option<fn(&T, &T) -> usize>,
 ) -> impl Iterator<Item = ProgressiveInclusion<T>>
 where
     T: Clone,
     L: IntoIterator<Item = T>,
     R: IntoIterator<Item = T>,
     C: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
-    M: FnMut(&mut T, &mut T) -> core::cmp::Ordering,
+    M: FnMut(&T, &T) -> core::cmp::Ordering,
 {
     let mut l = a.into_iter();
     let mut r = b.into_iter();
     Progressive {
         comparison,
         matches,
+        minimize_dist_right,
         l_next: l.next(),
         r_next: r.next(),
         l_peek: l.next(),
