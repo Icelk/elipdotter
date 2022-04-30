@@ -26,6 +26,8 @@ contain minimal examples.
 
 ## v0.2.0
 
+-   [Fixed issue](https://github.com/Icelk/elipdotter/commit/7ab071c) where AND NOT queries got erroneous results.
+-   [Fixed issue](https://github.com/Icelk/elipdotter/commit/51370f7) with OR queries. Now all occurrences in either of the documents are returned.
 -   Major improvements to relevancy of results, by checking more combinations of occurrences within a document. Small performance impact.
 -   Text `next-gen` is now matched by the query `nextgen` - words with hyphens are registered as both separate words and one single.
 -   Better [docs](https://doc.icelk.dev/elipdotter/elipdotter/).
