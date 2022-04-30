@@ -28,6 +28,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::proximity;
 
+/// Id of a document.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
 pub struct Id(u64);
 impl Id {
@@ -40,6 +41,7 @@ impl Id {
     }
 }
 
+/// An occurrence of [`crate::Query`].
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub struct Occurence {
     start: usize,
@@ -284,6 +286,7 @@ unsafe impl Sync for StrPtr {}
 
 pub(crate) type AlphanumRef = Alphanumeral<StrPtr>;
 
+/// Map of documents and their [`Id`]s to quickly get name from id and vice versa.
 #[derive(Debug)]
 #[must_use]
 pub struct DocumentMap {
@@ -324,6 +327,7 @@ impl DocumentMap {
         let id = self.reserve_id(name);
         provider.digest_document(id, content);
     }
+    /// Get first unused [`Id`].
     fn get_first(&self) -> Id {
         if self.id_to_name.is_empty() {
             return Id::new(0);
@@ -348,6 +352,9 @@ impl DocumentMap {
         self.name_to_id.get(name).copied()
     }
     /// O(log n)
+    ///
+    /// But since this is a BTree, this is often faster than O(1) in a hash map,
+    /// if we assume you have < 10_000 documents.
     #[must_use]
     pub fn get_name(&self, id: Id) -> Option<&str> {
         self.id_to_name.get(&id).map(|s| &**s)
@@ -418,8 +425,10 @@ pub trait Provider<'a> {
     /// The implementation should convert `word` to lower-case and remove any hyphen `-`.
     ///
     /// [`Alphanumeral`] can be used for this purpose.
-    fn insert_word(&mut self, word: impl AsRef<str>, document: Id);
+    fn insert_word(&mut self, word: impl AsRef<str>, document: Id, index: usize);
+    /// Removes all registered occurrences of `document` from all words.
     fn remove_document(&mut self, document: Id);
+    /// If `document` contains at least one occurrence of `word`.
     fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool;
     fn documents_with_word(&'a self, word: impl AsRef<str>) -> Option<Self::DocumentIter>;
 
@@ -437,6 +446,7 @@ pub trait Provider<'a> {
     fn digest_document(&mut self, id: Id, content: &str) {
         for item in SplitNonAlphanumeric::new(content) {
             let word = item.word();
+            let index = item.index();
             if word.is_empty() {
                 continue;
             }
@@ -446,7 +456,7 @@ pub trait Provider<'a> {
                 continue;
             }
 
-            self.insert_word(word, id);
+            self.insert_word(word, id, index);
         }
     }
 }
@@ -456,168 +466,6 @@ pub trait OccurenceProvider<'a> {
     /// `word_count_limit` is the limit where only words starting with the first [`char`] of `word`
     /// will be checked for proximity.
     fn occurrences_of_word(&'a self, word: &'a str) -> Option<Self::Iter>;
-}
-
-#[derive(Debug)]
-#[must_use]
-pub struct SimpleDocRef {
-    docs: BTreeSet<Id>,
-}
-impl SimpleDocRef {
-    pub fn new() -> Self {
-        Self {
-            docs: BTreeSet::new(),
-        }
-    }
-
-    pub fn insert(&mut self, document: Id) {
-        self.docs.insert(document);
-    }
-    pub fn remove(&mut self, document: Id) {
-        self.docs.remove(&document);
-    }
-    #[must_use]
-    pub fn contains(&self, document: Id) -> bool {
-        self.docs.contains(&document)
-    }
-    pub fn documents(&self) -> Copied<btree_set::Iter<'_, Id>> {
-        self.docs.iter().copied()
-    }
-}
-impl Default for SimpleDocRef {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Debug)]
-#[must_use]
-pub struct Simple {
-    words: BTreeMap<Arc<AlphanumRef>, SimpleDocRef>,
-
-    proximity_threshold: f32,
-    proximity_algo: proximity::Algorithm,
-    word_count_limit: usize,
-}
-impl Simple {
-    /// `proximity_threshold` is the threshold where alike words are also accepted.
-    /// It uses the range [0..1], where values nearer 0 allow more words.
-    /// The default is `0.9`.
-    ///
-    /// `proximity_threshold` is the algorithm used for proximity checking of words.
-    ///
-    /// `word_count_limit` is the number of words in this index where only words with the first
-    /// character is used for approximate matching.
-    /// Default is `2_500`.
-    pub fn new(
-        proximity_threshold: f32,
-        proximity_algorithm: proximity::Algorithm,
-        word_count_limit: usize,
-    ) -> Self {
-        Self {
-            words: BTreeMap::new(),
-            proximity_threshold,
-            proximity_algo: proximity_algorithm,
-            word_count_limit,
-        }
-    }
-    /// Merges `other` with `self`.
-    pub fn ingest(&mut self, other: Self) {
-        for (word, docs) in other.words {
-            if let Some(my_docs) = self.words.get_mut(&word) {
-                for doc in docs.documents() {
-                    my_docs.insert(doc);
-                }
-            } else {
-                self.words.insert(word, docs);
-            }
-        }
-    }
-}
-/// [`Self::new`] with `proximity_threshold` set to `0.9`.
-impl Default for Simple {
-    fn default() -> Self {
-        Self::new(0.85, proximity::Algorithm::Hamming, 2_500)
-    }
-}
-type FirstTy<'a, T, I> = fn((&'a T, &'a I)) -> &'a T;
-impl<'a> Provider<'a> for Simple {
-    type DocumentIter = Copied<btree_set::Iter<'a, Id>>;
-    type WordIter = btree_map::Keys<'a, Arc<AlphanumRef>, SimpleDocRef>;
-    type WordFilteredIter = Map<
-        btree_map::Range<'a, Arc<AlphanumRef>, SimpleDocRef>,
-        FirstTy<'a, Arc<AlphanumRef>, SimpleDocRef>,
-    >;
-
-    /// O(log n log n)
-    fn insert_word(&mut self, word: impl AsRef<str>, document: Id) {
-        let word = word.as_ref();
-        // SAFETY: We only use `StrPtr` in the current scope.
-        let ptr = unsafe { StrPtr::sref(word) };
-        if let Some(doc_ref) = self.words.get_mut(&Alphanumeral::new(ptr)) {
-            doc_ref.insert(document);
-        } else {
-            let mut doc_ref = SimpleDocRef::new();
-            doc_ref.insert(document);
-            let word = Alphanumeral::new(word).chars().collect::<String>();
-            let ptr = StrPtr::owned(word);
-            self.words.insert(Arc::new(Alphanumeral::new(ptr)), doc_ref);
-        }
-    }
-    /// O(n log n)
-    fn remove_document(&mut self, document: Id) {
-        for doc_ref in self.words.values_mut() {
-            doc_ref.remove(document);
-        }
-    }
-    /// O(log n log n)
-    fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool {
-        let word = word.as_ref();
-        // SAFETY: We only use `StrPtr` in the current scope.
-        let ptr = unsafe { StrPtr::sref(word) };
-        self.words
-            .get(&Alphanumeral::new(ptr))
-            .map_or(false, |word| word.contains(document))
-    }
-    /// O(log n)
-    ///
-    /// Iterator is O(1) - running this and consuming the iterator is O(n log n).
-    ///
-    /// You can get the length of the list using the [`ExactSizeIterator`] trait.
-    fn documents_with_word(&'a self, word: impl AsRef<str>) -> Option<Self::DocumentIter> {
-        // SAFETY: We only use `StrPtr` in the current scope.
-        let ptr = unsafe { StrPtr::sref(word.as_ref()) };
-        self.words
-            .get(&Alphanumeral::new(ptr))
-            .map(SimpleDocRef::documents)
-    }
-
-    fn word_count_upper_limit(&self) -> usize {
-        self.words.len()
-    }
-    fn word_count_limit(&self) -> usize {
-        self.word_count_limit
-    }
-    fn words(&'a self) -> Self::WordIter {
-        self.words.keys()
-    }
-    fn words_starting_with(&'a self, c: char) -> Self::WordFilteredIter {
-        let s1 = String::from(c);
-        let ptr1 = StrPtr::owned(s1);
-        let s2 = String::from(next_char(c));
-        let ptr2 = StrPtr::owned(s2);
-
-        self.words
-            .range(Alphanumeral::new(ptr1)..Alphanumeral::new(ptr2))
-            .map::<&Arc<AlphanumRef>, _>(|(k, _v)| k)
-    }
-
-    fn word_proximity_threshold(&self) -> f32 {
-        self.proximity_threshold
-    }
-    fn word_proximity_algorithm(&self) -> proximity::Algorithm {
-        self.proximity_algo
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -733,6 +581,171 @@ impl<'a> ProximateListOrSingle<'a> {
         }
     }
 }
+
+#[derive(Debug)]
+#[must_use]
+pub struct SimpleDocMap {
+    /// We need the order of documents to be sorted, as the sorted iterators relies on that.
+    docs: BTreeSet<Id>,
+}
+impl SimpleDocMap {
+    pub fn new() -> Self {
+        Self {
+            docs: BTreeSet::new(),
+        }
+    }
+
+    pub fn insert(&mut self, document: Id) {
+        self.docs.insert(document);
+    }
+    pub fn remove(&mut self, document: Id) {
+        self.docs.remove(&document);
+    }
+    #[must_use]
+    pub fn contains(&self, document: Id) -> bool {
+        self.docs.contains(&document)
+    }
+    pub fn documents(&self) -> Copied<btree_set::Iter<'_, Id>> {
+        self.docs.iter().copied()
+    }
+}
+impl Default for SimpleDocMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug)]
+#[must_use]
+pub struct Simple {
+    words: BTreeMap<Arc<AlphanumRef>, SimpleDocMap>,
+
+    proximity_threshold: f32,
+    proximity_algo: proximity::Algorithm,
+    word_count_limit: usize,
+}
+impl Simple {
+    /// `proximity_threshold` is the threshold where alike words are also accepted.
+    /// It uses the range [0..1], where values nearer 0 allow more words.
+    /// The default is `0.9`.
+    ///
+    /// `proximity_threshold` is the algorithm used for proximity checking of words.
+    ///
+    /// `word_count_limit` is the number of words in this index where only words with the first
+    /// character is used for approximate matching.
+    /// Default is `2_500`.
+    pub fn new(
+        proximity_threshold: f32,
+        proximity_algorithm: proximity::Algorithm,
+        word_count_limit: usize,
+    ) -> Self {
+        Self {
+            words: BTreeMap::new(),
+            proximity_threshold,
+            proximity_algo: proximity_algorithm,
+            word_count_limit,
+        }
+    }
+    /// Merges `other` with `self`.
+    pub fn ingest(&mut self, other: Self) {
+        for (word, docs) in other.words {
+            if let Some(my_docs) = self.words.get_mut(&word) {
+                for doc in docs.documents() {
+                    my_docs.insert(doc);
+                }
+            } else {
+                self.words.insert(word, docs);
+            }
+        }
+    }
+}
+/// [`Self::new`] with `proximity_threshold` set to `0.85`.
+impl Default for Simple {
+    fn default() -> Self {
+        Self::new(0.85, proximity::Algorithm::Hamming, 2_500)
+    }
+}
+type FirstTy<'a, T, I> = fn((&'a T, &'a I)) -> &'a T;
+impl<'a> Provider<'a> for Simple {
+    type DocumentIter = Copied<btree_set::Iter<'a, Id>>;
+    type WordIter = btree_map::Keys<'a, Arc<AlphanumRef>, SimpleDocMap>;
+    type WordFilteredIter = Map<
+        btree_map::Range<'a, Arc<AlphanumRef>, SimpleDocMap>,
+        FirstTy<'a, Arc<AlphanumRef>, SimpleDocMap>,
+    >;
+
+    /// O(log n log n)
+    fn insert_word(&mut self, word: impl AsRef<str>, document: Id, _index: usize) {
+        let word = word.as_ref();
+        // SAFETY: We only use `StrPtr` in the current scope.
+        let ptr = unsafe { StrPtr::sref(word) };
+        if let Some(word_docs) = self.words.get_mut(&Alphanumeral::new(ptr)) {
+            word_docs.insert(document);
+        } else {
+            let mut word_docs = SimpleDocMap::new();
+            word_docs.insert(document);
+            let word = Alphanumeral::new(word).chars().collect::<String>();
+            let ptr = StrPtr::owned(word);
+            self.words
+                .insert(Arc::new(Alphanumeral::new(ptr)), word_docs);
+        }
+    }
+    /// O(n log n)
+    fn remove_document(&mut self, document: Id) {
+        for word_docs in self.words.values_mut() {
+            word_docs.remove(document);
+        }
+    }
+    /// O(log n log n)
+    fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool {
+        let word = word.as_ref();
+        // SAFETY: We only use `StrPtr` in the current scope.
+        let ptr = unsafe { StrPtr::sref(word) };
+        self.words
+            .get(&Alphanumeral::new(ptr))
+            .map_or(false, |word| word.contains(document))
+    }
+    /// O(log n)
+    ///
+    /// Iterator is O(1) - running this and consuming the iterator is O(n log n).
+    ///
+    /// You can get the length of the list using the [`ExactSizeIterator`] trait.
+    fn documents_with_word(&'a self, word: impl AsRef<str>) -> Option<Self::DocumentIter> {
+        // SAFETY: We only use `StrPtr` in the current scope.
+        let ptr = unsafe { StrPtr::sref(word.as_ref()) };
+        self.words
+            .get(&Alphanumeral::new(ptr))
+            .map(SimpleDocMap::documents)
+    }
+
+    fn word_count_upper_limit(&self) -> usize {
+        self.words.len()
+    }
+    fn word_count_limit(&self) -> usize {
+        self.word_count_limit
+    }
+    fn words(&'a self) -> Self::WordIter {
+        self.words.keys()
+    }
+    fn words_starting_with(&'a self, c: char) -> Self::WordFilteredIter {
+        let s1 = String::from(c);
+        let ptr1 = StrPtr::owned(s1);
+        let s2 = String::from(next_char(c));
+        let ptr2 = StrPtr::owned(s2);
+
+        self.words
+            .range(Alphanumeral::new(ptr1)..Alphanumeral::new(ptr2))
+            .map::<&Arc<AlphanumRef>, _>(|(k, _v)| k)
+    }
+
+    fn word_proximity_threshold(&self) -> f32 {
+        self.proximity_threshold
+    }
+    fn word_proximity_algorithm(&self) -> proximity::Algorithm {
+        self.proximity_algo
+    }
+}
+
 #[derive(Debug)]
 pub struct SimpleOccurrencesIter<'a, I> {
     iter: I,
@@ -840,7 +853,7 @@ impl<'a> SimpleOccurences<'a> {
         self.document_contents.insert(id, content);
     }
 
-    /// Removes the missing references.
+    /// Remove the missing references.
     #[allow(clippy::missing_panics_doc)]
     pub fn missing(&self) -> MissingOccurrences {
         MissingOccurrences {
@@ -915,11 +928,289 @@ impl MissingOccurrences {
     }
 }
 
+/// The occurrences of a word in this document.
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[must_use]
+pub struct LosslessDocOccurrences {
+    /// A list of the byte index where the start of the word is at.
+    occurrences: Vec<usize>,
+}
+impl LosslessDocOccurrences {
+    pub fn new() -> Self {
+        Self {
+            occurrences: Vec::new(),
+        }
+    }
+}
+impl Default for LosslessDocOccurrences {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+/// The docs this word exists in.
+/// Each doc has an associated [`LosslessDocOccurrences`] which keeps track of all the occurrences
+/// in that document.
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[must_use]
+pub struct LosslessDocMap {
+    /// We need the order of documents to be sorted, as the sorted iterators relies on that.
+    docs: BTreeMap<Id, LosslessDocOccurrences>,
+}
+impl LosslessDocMap {
+    pub fn new() -> Self {
+        Self {
+            docs: BTreeMap::new(),
+        }
+    }
+
+    /// If `document` has at least one occurrence.
+    #[must_use]
+    pub fn contains(&self, document: Id) -> bool {
+        self.docs.contains_key(&document)
+    }
+    /// Returns an iterator over the documents with at least one occurrence of the word in
+    /// question.
+    pub fn documents(&self) -> Copied<btree_map::Keys<'_, Id, LosslessDocOccurrences>> {
+        self.docs.keys().copied()
+    }
+
+    fn doc(&mut self, document: Id) -> &mut LosslessDocOccurrences {
+        self.docs
+            .entry(document)
+            .or_insert_with(LosslessDocOccurrences::default)
+    }
+}
+impl Default for LosslessDocMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+#[derive(Debug, Clone)]
+#[must_use]
+pub struct Lossless {
+    words: BTreeMap<Arc<AlphanumRef>, LosslessDocMap>,
+
+    proximity_threshold: f32,
+    proximity_algo: proximity::Algorithm,
+    word_count_limit: usize,
+}
+impl Lossless {
+    /// `proximity_threshold` is the threshold where alike words are also accepted.
+    /// It uses the range [0..1], where values nearer 0 allow more words.
+    /// The default is `0.9`.
+    ///
+    /// `proximity_threshold` is the algorithm used for proximity checking of words.
+    ///
+    /// `word_count_limit` is the number of words in this index where only words with the first
+    /// character is used for approximate matching.
+    /// Default is `2_500`.
+    pub fn new(
+        proximity_threshold: f32,
+        proximity_algorithm: proximity::Algorithm,
+        word_count_limit: usize,
+    ) -> Self {
+        Self {
+            words: BTreeMap::new(),
+            proximity_threshold,
+            proximity_algo: proximity_algorithm,
+            word_count_limit,
+        }
+    }
+    /// Merges `other` with `self`.
+    pub fn ingest(&mut self, other: Self) {
+        for (word, docs) in other.words {
+            if let Some(my_docs) = self.words.get_mut(&word) {
+                for (doc, mut occurrences) in docs.docs {
+                    let my = my_docs.doc(doc);
+
+                    my.occurrences.append(&mut occurrences.occurrences);
+                    my.occurrences.sort_unstable();
+                    my.occurrences.dedup();
+                }
+            } else {
+                self.words.insert(word, docs);
+            }
+        }
+    }
+}
+/// [`Self::new`] with `proximity_threshold` set to `0.85`.
+impl Default for Lossless {
+    fn default() -> Self {
+        Self::new(0.85, proximity::Algorithm::Hamming, 1000)
+    }
+}
+impl<'a> Provider<'a> for Lossless {
+    type DocumentIter = Copied<btree_map::Keys<'a, Id, LosslessDocOccurrences>>;
+    type WordIter = btree_map::Keys<'a, Arc<AlphanumRef>, LosslessDocMap>;
+    type WordFilteredIter = Map<
+        btree_map::Range<'a, Arc<AlphanumRef>, LosslessDocMap>,
+        FirstTy<'a, Arc<AlphanumRef>, LosslessDocMap>,
+    >;
+
+    /// O(log n log n)
+    fn insert_word(&mut self, word: impl AsRef<str>, document: Id, index: usize) {
+        let word = word.as_ref();
+        // SAFETY: We only use `StrPtr` in the current scope.
+        let ptr = unsafe { StrPtr::sref(word) };
+        if let Some(word_docs) = self.words.get_mut(&Alphanumeral::new(ptr)) {
+            let doc = word_docs.doc(document);
+            match doc.occurrences.binary_search(&index) {
+                Ok(_) => {}
+                Err(idx) => doc.occurrences.insert(idx, index),
+            }
+        } else {
+            let mut word_docs = LosslessDocMap::new();
+            word_docs.doc(document).occurrences.push(index);
+            let word = Alphanumeral::new(word).chars().collect::<String>();
+            let ptr = StrPtr::owned(word);
+            self.words
+                .insert(Arc::new(Alphanumeral::new(ptr)), word_docs);
+        }
+    }
+    /// O(n log n)
+    fn remove_document(&mut self, document: Id) {
+        for word_docs in self.words.values_mut() {
+            word_docs.docs.remove(&document);
+        }
+    }
+    /// O(log n log n)
+    fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool {
+        let word = word.as_ref();
+        // SAFETY: We only use `StrPtr` in the current scope.
+        let ptr = unsafe { StrPtr::sref(word) };
+        self.words
+            .get(&Alphanumeral::new(ptr))
+            .map_or(false, |word| word.contains(document))
+    }
+    /// O(log n)
+    ///
+    /// Iterator is O(1) - running this and consuming the iterator is O(n log n).
+    ///
+    /// You can get the length of the list using the [`ExactSizeIterator`] trait.
+    fn documents_with_word(&'a self, word: impl AsRef<str>) -> Option<Self::DocumentIter> {
+        // SAFETY: We only use `StrPtr` in the current scope.
+        let ptr = unsafe { StrPtr::sref(word.as_ref()) };
+        self.words
+            .get(&Alphanumeral::new(ptr))
+            .map(LosslessDocMap::documents)
+    }
+
+    fn word_count_upper_limit(&self) -> usize {
+        self.words.len()
+    }
+    fn word_count_limit(&self) -> usize {
+        self.word_count_limit
+    }
+    fn words(&'a self) -> Self::WordIter {
+        self.words.keys()
+    }
+    fn words_starting_with(&'a self, c: char) -> Self::WordFilteredIter {
+        let s1 = String::from(c);
+        let ptr1 = StrPtr::owned(s1);
+        let s2 = String::from(next_char(c));
+        let ptr2 = StrPtr::owned(s2);
+
+        self.words
+            .range(Alphanumeral::new(ptr1)..Alphanumeral::new(ptr2))
+            .map::<&Arc<AlphanumRef>, _>(|(k, _v)| k)
+    }
+
+    fn word_proximity_threshold(&self) -> f32 {
+        self.proximity_threshold
+    }
+    fn word_proximity_algorithm(&self) -> proximity::Algorithm {
+        self.proximity_algo
+    }
+}
+#[derive(Debug)]
+#[must_use]
+pub struct LosslessOccurrences<'a> {
+    index: &'a Lossless,
+    word_proximates: &'a proximity::ProximateMap<'a>,
+}
+impl<'a> LosslessOccurrences<'a> {
+    pub fn new(index: &'a Lossless, word_proximates: &'a proximity::ProximateMap<'a>) -> Self {
+        Self {
+            index,
+            word_proximates,
+        }
+    }
+}
+#[derive(Debug)]
+pub struct LosslessOccurrencesIter<'a, I> {
+    iter: I,
+
+    #[allow(clippy::type_complexity)] // That's not complex.
+    current: Option<(core::slice::Iter<'a, usize>, Id, f32)>,
+}
+impl<'a, I: Iterator<Item = (&'a Vec<usize>, Id, f32)>> LosslessOccurrencesIter<'a, I> {
+    fn new(iter: I) -> Self {
+        Self {
+            iter,
+            current: None,
+        }
+    }
+}
+impl<'a, I: Iterator<Item = (&'a Vec<usize>, Id, f32)>> Iterator
+    for LosslessOccurrencesIter<'a, I>
+{
+    type Item = Occurence;
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some((words_in_doc, doc_id, word_proximity)) = &mut self.current {
+            if let Some(start) = words_in_doc.next() {
+                let rating = (*word_proximity - 1.0) * 4.0;
+                let mut occ = Occurence::new(*start, *doc_id, 0);
+                *occ.rating_mut() += rating;
+                return Some(occ);
+            }
+        }
+
+        let (occurrences, next_doc, word_proximity) = self.iter.next()?;
+        self.current = Some((occurrences.iter(), next_doc, word_proximity));
+        self.next()
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+impl<'a> OccurenceProvider<'a> for LosslessOccurrences<'a> {
+    type Iter =
+        LosslessOccurrencesIter<'a, Box<dyn Iterator<Item = (&'a Vec<usize>, Id, f32)> + 'a>>;
+    fn occurrences_of_word(&'a self, word: &'a str) -> Option<Self::Iter> {
+        if let proximity::Algorithm::Exact = self.index.word_proximity_algorithm() {
+            // SAFETY: We only use it in this scope.
+            let ptr = unsafe { StrPtr::sref(word) };
+            let word_ptr = self.index.words.get_key_value(&Alphanumeral::new(ptr))?.0;
+
+            Some(LosslessOccurrencesIter::new(Box::new(
+                self.index
+                    .words
+                    .get(&**word_ptr)?
+                    .docs
+                    .iter()
+                    .map(|(id, occs)| (&occs.occurrences, *id, 1.0)),
+            )))
+        } else {
+            let words = self.word_proximates.get_panic(word);
+
+            Some(LosslessOccurrencesIter::new(Box::new(
+                crate::proximity::proximate_word_docs(self.index, words)
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .map(crate::proximity::ProximateDocItem::into_parts)
+                    .map(|(id, word, rating)| {
+                        (&self.index.words[word].docs[&id].occurrences, id, rating)
+                    }),
+            )))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        Alphanumeral, DocumentMap, Id, Occurence, OccurenceProvider, Provider, Simple,
-        SimpleOccurences,
+        Alphanumeral, DocumentMap, Id, Lossless, LosslessOccurrences, Occurence, OccurenceProvider,
+        Provider, Simple, SimpleOccurences,
     };
 
     fn doc1() -> &'static str {
@@ -947,7 +1238,7 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
     }
 
     #[test]
-    fn occurences() {
+    fn occurences_simple() {
         let mut doc_map = DocumentMap::new();
         let mut index = Simple::new(1.0, crate::proximity::Algorithm::Exact, 100);
         doc_map.insert("doc1", doc1(), &mut index);
@@ -978,6 +1269,37 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
             occurrences.next(),
             Some(Occurence::new(0, doc_map.get_id("doc3").unwrap(), 0))
         );
-        assert_eq!(occurrences.next(), None,);
+        assert_eq!(occurrences.next(), None);
+    }
+    #[test]
+    fn occurences_lossless() {
+        let mut doc_map = DocumentMap::new();
+        let mut index = Lossless::new(1.0, crate::proximity::Algorithm::Exact, 100);
+        doc_map.insert("doc1", doc1(), &mut index);
+        doc_map.insert("doc3", doc2(), &mut index);
+
+        assert!(index.contains_word("lorem", doc_map.get_id("doc1").unwrap()));
+        assert!(index.contains_word("lorem", doc_map.get_id("doc3").unwrap()));
+        assert_eq!(doc_map.get_id("doc3"), Some(Id::new(1)));
+        assert_eq!(doc_map.get_id("doc2"), None);
+
+        let proximate_map = crate::proximity::ProximateMap::new();
+
+        let lossless_provider = LosslessOccurrences::new(&index, &proximate_map);
+
+        let mut occurrences = lossless_provider.occurrences_of_word("lorem").unwrap();
+        assert_eq!(
+            occurrences.next(),
+            Some(Occurence::new(0, doc_map.get_id("doc1").unwrap(), 0))
+        );
+        assert_eq!(
+            occurrences.next(),
+            Some(Occurence::new(875, doc_map.get_id("doc1").unwrap(), 0))
+        );
+        assert_eq!(
+            occurrences.next(),
+            Some(Occurence::new(0, doc_map.get_id("doc3").unwrap(), 0))
+        );
+        assert_eq!(occurrences.next(), None);
     }
 }

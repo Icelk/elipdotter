@@ -29,6 +29,7 @@ pub mod query;
 pub mod set;
 
 pub use index::{
-    DocumentMap, Simple as SimpleIndex, SimpleOccurences as SimpleIndexOccurenceProvider,
+    DocumentMap, Lossless as LosslessIndex, LosslessOccurrences as LosslessOccurrencesProvider,
+    Simple as SimpleIndex, SimpleOccurences as SimpleOccurrencesProvider,
 };
 pub use query::{Hit, Part, Query};

@@ -31,7 +31,7 @@ impl<'a, WI: Iterator<Item = &'a Arc<AlphanumRef>>, WFI: Iterator<Item = &'a Arc
 ///
 /// See [`strsim`] for more details on these algorithms,
 /// as that's the library which provide them.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Algorithm {
     /// about 10x as slow as [`Self::Exact`],
     /// but actually accepts similar words.

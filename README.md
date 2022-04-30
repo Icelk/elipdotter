@@ -24,6 +24,11 @@ contain minimal examples.
 
 # Changelog
 
+## v0.3.0
+
+-   Added lossless index for faster query resolution times.
+    -   10x better performance at the cost of having all the documents in memory.
+
 ## v0.2.0
 
 -   [Fixed issue](https://github.com/Icelk/elipdotter/commit/7ab071c) where AND NOT queries got erroneous results.
