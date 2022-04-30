@@ -846,7 +846,15 @@ pub mod parse {
             }
             Ok(1)
         }
-        fn finish_part(&mut self, op: Option<Op>, right: Part) {
+        fn finish_part(&mut self, op: Option<Op>, mut right: Part) {
+            if let Some(marker) = self.string_marker.take() {
+                match marker {
+                    Op::Not => right = Part::not(right),
+                    Op::And | Op::Or => {
+                        unreachable!("In `set_string_marker`, we check for binary.")
+                    }
+                }
+            }
             if let Some(op) = op {
                 self.left = Some(self.finish_op(op, right));
             } else {
@@ -1227,6 +1235,14 @@ mod tests {
             p,
             Part::and(Part::or("icelk", "iselk"), Part::or("kvarn", "agde"))
         );
+    }
+    #[test]
+    fn parse_parentheses_and_not() {
+        let p = s("icelk -(agde or kvarn)");
+        assert_eq!(p, Part::and("icelk", Part::not(Part::or("kvarn", "agde"))));
+
+        let p = s("icelk - (agde or kvarn)");
+        assert_eq!(p, Part::and("icelk", Part::not(Part::or("kvarn", "agde"))));
     }
     #[test]
     fn parse_not() {
