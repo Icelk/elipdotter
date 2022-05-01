@@ -431,6 +431,14 @@ pub trait Provider<'a> {
     /// If `document` contains at least one occurrence of `word`.
     fn contains_word(&self, word: impl AsRef<str>, document: Id) -> bool;
     fn documents_with_word(&'a self, word: impl AsRef<str>) -> Option<Self::DocumentIter>;
+    /// Estimate of the number of bytes this index uses in memory,
+    /// specifically the heap.
+    ///
+    /// This assumes you're on a 64-bit architecture. Else, you can expect the size to be half, as
+    /// most of what's stored in an index is pointers to data.
+    ///
+    /// This should not be relied on. Rather, it's a *hint*.
+    fn size(&self) -> usize;
 
     fn word_count_upper_limit(&self) -> usize;
     /// The limit of [`Self::word_count_upper_limit`] where [`Self::words_starting_with`] is used
@@ -717,6 +725,13 @@ impl<'a> Provider<'a> for Simple {
             .get(&Alphanumeral::new(ptr))
             .map(SimpleDocMap::documents)
     }
+    fn size(&self) -> usize {
+        self.words
+            .iter()
+            // +16 for Arc size and btree size
+            .map(|(word, docs)| word.0.as_ref().len() + 16 + docs.docs.len() * 8 + 16)
+            .sum()
+    }
 
     fn word_count_upper_limit(&self) -> usize {
         self.words.len()
@@ -985,6 +1000,12 @@ impl Default for LosslessDocMap {
         Self::new()
     }
 }
+
+/// Index which keeps track of all occurrences of all words.
+///
+/// Much (10x) faster than [`Simple`], but memory need grows linearly with content added.
+/// [`Simple`]s memory usage grows only with word count & document count.
+/// If you have relatively short documents, this doesn't take up a lot more memory (only about 2-4x).
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct Lossless {
@@ -1093,6 +1114,22 @@ impl<'a> Provider<'a> for Lossless {
         self.words
             .get(&Alphanumeral::new(ptr))
             .map(LosslessDocMap::documents)
+    }
+    fn size(&self) -> usize {
+        self.words
+            .iter()
+            .map(|(word, docs)| {
+                // +16 for Arc size and btree map
+                (word.0.as_ref().len() + 16)
+                    + (docs
+                        .docs
+                        .iter()
+                        // 8 for ID, 16 for vec size
+                        .map(|(_id, occs)| 8 + occs.occurrences.len() * 8 + 16)
+                        .sum::<usize>()
+                        + 16)
+            })
+            .sum()
     }
 
     fn word_count_upper_limit(&self) -> usize {
