@@ -219,6 +219,11 @@ impl<
                         self.next_r();
                         continue;
                     }
+                    // Now the NOT (right) is as close as possible. Even if it's behind, take the
+                    // next AND (left) and check it. Else, the current NOT will not be checked against.
+                    let ret = ProgressiveInclusion::Both(left.clone(), right.clone());
+                    self.next_l();
+                    return Some(ret);
                 }
             }
             let ret = ProgressiveInclusion::Both(left.clone(), right.clone());
