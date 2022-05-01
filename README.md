@@ -28,6 +28,9 @@ contain minimal examples.
 
 -   Added lossless index for faster query resolution times.
     -   10x better performance at the cost of having all the documents in memory.
+-   Fixed parsing issue where `for me` would be parsed as `OR(f, me)`.
+-   Fixed issue with AND NOT, where AND didn't find the closest NOT occurrence.
+-   Added size method to indices to estimate the memory usage.
 
 ## v0.2.0
 
