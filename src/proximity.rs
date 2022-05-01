@@ -279,21 +279,24 @@ pub struct ProximateDocIter<'a, P: Provider<'a>> {
 impl<'a, P: Provider<'a>> Iterator for ProximateDocIter<'a, P> {
     type Item = ProximateDocItem<'a>;
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some((word, doc_iter, proximity)) = &mut self.current {
-            if let Some(doc) = doc_iter.next() {
-                Some(ProximateDocItem::new((doc, word, *proximity)))
-            } else {
+        loop {
+            if let Some((word, doc_iter, proximity)) = &mut self.current {
+                if let Some(doc) = doc_iter.next() {
+                    println!("Next in iter over {word} in {doc:?} with proximity {proximity}");
+                    return Some(ProximateDocItem::new((doc, word, *proximity)));
+                }
                 self.current = None;
-                self.next()
+                continue;
             }
-        } else if let Some((next_word, proximity)) = self.word_iter.next() {
-            self.current = self
-                .provider
-                .documents_with_word(&**next_word)
-                .map(|iter| (next_word, iter, *proximity));
-            self.next()
-        } else {
-            None
+            if let Some((next_word, proximity)) = self.word_iter.next() {
+                println!("Check word {next_word} with proximity {proximity}");
+                self.current = self
+                    .provider
+                    .documents_with_word(&**next_word)
+                    .map(|iter| (next_word, iter, *proximity));
+                continue;
+            }
+            return None;
         }
     }
 }
