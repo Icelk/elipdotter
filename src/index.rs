@@ -847,7 +847,7 @@ pub struct SimpleOccurences<'a> {
 /// but with an empty [`String`].
 impl<'a> SimpleOccurences<'a> {
     /// The [`proximity::ProximateMap`] can be acquired from
-    /// [`crate::query::Documents::take_proximate_map`] which is returned from [`Query::documents`].
+    /// [`crate::query::Documents::take_proximate_map`] which is returned from [`crate::Query::documents`].
     pub fn new(index: &'a Simple, word_proximates: &'a proximity::ProximateMap<'a>) -> Self {
         Self {
             index,
@@ -1160,7 +1160,7 @@ pub struct LosslessOccurrences<'a> {
 }
 impl<'a> LosslessOccurrences<'a> {
     /// The [`proximity::ProximateMap`] can be acquired from
-    /// [`crate::query::Documents::take_proximate_map`] which is returned from [`Query::documents`].
+    /// [`crate::query::Documents::take_proximate_map`] which is returned from [`crate::Query::documents`].
     pub fn new(index: &'a Lossless, word_proximates: &'a proximity::ProximateMap<'a>) -> Self {
         Self {
             index,

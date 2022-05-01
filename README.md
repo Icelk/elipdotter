@@ -31,6 +31,7 @@ contain minimal examples.
 -   Fixed parsing issue where `for me` would be parsed as `OR(f, me)`.
 -   Fixed issue with AND NOT, where AND didn't find the closest NOT occurrence.
 -   Added size method to indices to estimate the memory usage.
+-   Improvements to [docs](https://doc.icelk.dev/elipdotter/elipdotter/).
 
 ## v0.2.0
 

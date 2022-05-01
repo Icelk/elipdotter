@@ -235,7 +235,7 @@ impl<
 /// `comparison` stays.
 ///
 /// If `minimize_dist_right` is [`Some`], the algorithm will only return
-/// [`ProgressiveInclusion::Both`] once `b` is close to `a` as possible.
+/// [`Inclusion::Both`] once `b` is close to `a` as possible.
 /// It should return the distance between the two points (using the same algorithm as `comparison`).
 /// This is very useful when doing `AND NOT` operations. Set it to [`None`] otherwise.
 pub fn progressive<T, L, R, C, M>(
