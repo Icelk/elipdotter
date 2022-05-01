@@ -58,7 +58,9 @@ impl<T: PartialEq, I: Iterator<Item = T>, F: Fn(T, T) -> T> Iterator for Dedupli
 /// always have any duplicate items right after each other.
 ///
 /// All the iterators used within elipdotter are sorted.
-pub fn deduplicate<T: PartialEq, I: Iterator<Item = T>>(iter: I) -> Deduplicate<T, I, fn(T, T) -> T> {
+pub fn deduplicate<T: PartialEq, I: Iterator<Item = T>>(
+    iter: I,
+) -> Deduplicate<T, I, fn(T, T) -> T> {
     Deduplicate::new(iter, |a, _| a)
 }
 /// Removes consecutive duplicate items.
