@@ -11,8 +11,8 @@ use std::iter::Peekable;
 use crate::index::{self, AssociatedOccurrence};
 use crate::index::{Occurence, Provider};
 use crate::proximity::ProximateMap;
-use crate::set::ProgressiveInclusion;
 use crate::{proximity, set};
+use iter_set::Inclusion;
 pub use parse::{parse, Options as ParseOptions};
 
 #[derive(Debug, Clone)]
@@ -239,8 +239,11 @@ impl<'a, 'b, P: Provider<'a>> Documents<'a, 'b, P> {
             &set::union,
         )
     }
+    /// The list of proximate words.
+    /// This is populated on creation and used in [`Self::iter`].
+    /// Using [`Self::iter`] after calling this will most likely result in a panic.
     pub fn take_proximate_map(&mut self) -> ProximateMap<'b> {
-        std::mem::take(&mut self.proximate_map)
+        core::mem::take(&mut self.proximate_map)
     }
 }
 
@@ -462,12 +465,12 @@ impl Query {
                             Some(abs_diff_occurrence),
                         )
                         .filter_map(|inclusion| match inclusion {
-                            ProgressiveInclusion::Left(mut and) => {
+                            Inclusion::Left(mut and) => {
                                 *and.0.rating_mut() += 2.5;
                                 Some(and)
                             }
-                            ProgressiveInclusion::Right(_not) => None,
-                            ProgressiveInclusion::Both(mut and, not) => {
+                            Inclusion::Right(_not) => None,
+                            Inclusion::Both(mut and, not) => {
                                 let not_rating = not.0.rating();
                                 let closest = and.closest(&OccurenceEq::new(not.0.occurrence, 0));
                                 // Don't really care about precision.
@@ -498,7 +501,7 @@ impl Query {
                         None,
                     )
                     .filter_map(|inclusion| match inclusion {
-                        ProgressiveInclusion::Both(mut a, b) => {
+                        Inclusion::Both(mut a, b) => {
                             a.0.merge(&b.0);
                             Some(a)
                         }
@@ -518,11 +521,11 @@ impl Query {
                         None,
                     )
                     .map(|inclusion| match inclusion {
-                        ProgressiveInclusion::Both(mut a, b) => {
+                        Inclusion::Both(mut a, b) => {
                             a.0.merge(&b.0);
                             a
                         }
-                        ProgressiveInclusion::Left(a) | ProgressiveInclusion::Right(a) => a,
+                        Inclusion::Left(a) | Inclusion::Right(a) => a,
                     })
                 },
             )
@@ -705,6 +708,10 @@ pub mod parse {
         }
     }
 
+    /// Parse `s` with `opts`.
+    ///
+    /// You can also use the [`FromStr`] trait implemented by [`Query`] and [`Part`]
+    /// if you don't care about the [`Options`].
     #[allow(clippy::missing_panics_doc)]
     #[allow(clippy::missing_errors_doc)]
     pub fn parse(s: &str, opts: Options) -> Result<Part, Error> {
@@ -990,6 +997,12 @@ pub mod parse {
         rules: Vec<Box<dyn Rule>>,
     }
     impl Options {
+        /// Crates a new, empty, set of options.
+        /// The order of [`Self::insert`] matters a lot.
+        ///
+        /// [`Self::populate_and_space`] should definitely be last.
+        ///
+        /// See [`literal_rule!`] for an example.
         pub fn new() -> Self {
             Self { rules: Vec::new() }
         }
@@ -997,16 +1010,24 @@ pub mod parse {
             self.rules.push(Box::new(rule));
             self
         }
+        pub fn populate_literals(self) -> Self {
+            self.insert(NotLiteral::default())
+                .insert(AndLiteral::default())
+                .insert(OrLiteral::default())
+        }
+        pub fn populate_not(self) -> Self {
+            self.insert(DashNot::default()).insert(BangNot::default())
+        }
+        pub fn populate_and_space(self) -> Self {
+            self.insert(AndSpace::default())
+        }
     }
     impl Default for Options {
         fn default() -> Self {
             Self::new()
-                .insert(NotLiteral::default())
-                .insert(AndLiteral::default())
-                .insert(OrLiteral::default())
-                .insert(DashNot::default())
-                .insert(BangNot::default())
-                .insert(AndSpace::default())
+                .populate_literals()
+                .populate_not()
+                .populate_and_space()
         }
     }
     pub trait Rule: Debug {
@@ -1053,8 +1074,24 @@ pub mod parse {
         }
     }
 
+    /// Used in [parsing](self).
+    ///
+    /// # Examples
+    ///
+    /// See [`literal_rule!`] and [`not_prefix!`].
+    ///
+    /// ```
+    /// use elipdotter::*;
+    /// use elipdotter::query::Part;
+    /// use elipdotter::query::parse::LiteralRule;
+    /// generate_rule!(EllerLiteral, LiteralRule, LiteralRule::new("eller", query::parse::Op::Or));
+    /// let opts = elipdotter::query::ParseOptions::new().populate_literals().insert(EllerLiteral::default()).populate_not().populate_and_space();
+    /// let part = elipdotter::query::parse("elipdotter eller search", opts).unwrap();
+    /// assert_eq!(part, Part::or("elipdotter", "search"));
+    /// ```
+    #[macro_export]
     macro_rules! generate_rule {
-        ($name: ident, $struct: ident, $new: expr) => {
+        ($name: ident, $struct: path, $new: expr) => {
             #[derive(Debug)]
             #[must_use]
             pub struct $name($struct);
@@ -1068,8 +1105,12 @@ pub mod parse {
                     Self::new()
                 }
             }
-            impl Rule for $name {
-                fn next(&mut self, parser: &mut Parser, rest: &str) -> Option<usize> {
+            impl $crate::query::parse::Rule for $name {
+                fn next(
+                    &mut self,
+                    parser: &mut $crate::query::parse::Parser,
+                    rest: &str,
+                ) -> Option<usize> {
                     self.0.next(parser, rest)
                 }
             }
@@ -1122,10 +1163,26 @@ pub mod parse {
         }
     }
 
+    /// Used in [parsing](self).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use elipdotter::*;
+    /// use elipdotter::query::Part;
+    /// literal_rule!(EllerLiteral, "eller", query::parse::Op::Or);
+    /// let opts = elipdotter::query::ParseOptions::new().populate_literals().insert(EllerLiteral::default()).populate_not().populate_and_space();
+    /// let part = elipdotter::query::parse("elipdotter eller search", opts).unwrap();
+    /// assert_eq!(part, Part::or("elipdotter", "search"));
+    /// ```
     #[macro_export]
     macro_rules! literal_rule {
         ($name: ident, $literal: expr, $op: expr) => {
-            generate_rule!($name, LiteralRule, LiteralRule::new($literal, $op));
+            $crate::generate_rule!(
+                $name,
+                $crate::query::parse::LiteralRule,
+                $crate::query::parse::LiteralRule::new($literal, $op)
+            );
         };
     }
 
@@ -1162,10 +1219,26 @@ pub mod parse {
         }
     }
 
+    /// Used in [parsing](self).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use elipdotter::*;
+    /// use elipdotter::query::Part;
+    /// not_prefix!(HyphenNot, "-");
+    /// let opts = elipdotter::query::ParseOptions::default().insert(HyphenNot::default());
+    /// let part = elipdotter::query::parse("elipdotter -search", opts).unwrap();
+    /// assert_eq!(part, Part::and("elipdotter", Part::not("search")));
+    /// ```
     #[macro_export]
     macro_rules! not_prefix {
         ($name: ident, $prefix: expr) => {
-            generate_rule!($name, NotPrefix, NotPrefix::new($prefix));
+            $crate::generate_rule!(
+                $name,
+                $crate::query::parse::NotPrefix,
+                $crate::query::parse::NotPrefix::new($prefix)
+            );
         };
     }
     not_prefix!(DashNot, "-");
@@ -1223,7 +1296,7 @@ mod tests {
         let p = s("or");
         assert_eq!(p, Part::s("or"));
         let p = s("for me");
-        assert_eq!(p, Part::and(Part::s("for"), Part::s("me")));
+        assert_eq!(p, Part::and("for", "me"));
     }
     #[test]
     fn parse_empty() {
@@ -1333,16 +1406,17 @@ mod tests {
                     Part::and("agde", Part::not("sync")),
                     Part::and("icelk", Part::not("kvarn"))
                 ),
-                Part::s("agde")
+                "agde"
             )
         );
     }
     #[test]
     fn parse_prefix_not() {
         assert_eq!(s("icelk !kvarn"), s("icelk -kvarn"));
+        assert_eq!(s("icelk !kvarn"), Part::and("icelk", Part::not("kvarn")));
         assert_eq!(
-            s("icelk !kvarn"),
-            Part::and(Part::s("icelk"), Part::not("kvarn"))
+            s("elipdotter -search"),
+            Part::and("elipdotter", Part::not("search"))
         );
     }
     #[test]
@@ -1350,10 +1424,7 @@ mod tests {
         assert_eq!(s("icelk.dev"), Part::s("icelkdev"));
         assert_eq!(
             s("next-generation kvarn"),
-            Part::and(
-                Part::and(Part::s("next"), Part::s("generation")),
-                Part::s("kvarn")
-            )
+            Part::and(Part::and("next", "generation"), "kvarn")
         );
     }
 

@@ -9,16 +9,6 @@
 //! ---
 //!
 //! The [`DocumentMap`] makes it performant to get the document ID from name and vice versa.
-//!
-//! # Big O notation reference
-//!
-//! `O(1) < O(log n) < O(log n * log n) < O(sqrt(n)) < O(n) < O(n * log n) < O(n^1.1) < O(n²) < O(n³) < O(2^n)`
-//!
-//! `O(sqrt(n))` is true for all `sqrt(n^m)` where `0<m<1`.
-//!
-//! Since `O(log n)` is very close to `O(1)`,
-//! `O(log n * log n)` is also and
-//! `O(n * log n)` is very close to `O(n)`.
 
 use std::cmp;
 use std::collections::{btree_map, btree_set, BTreeMap, BTreeSet, HashMap};
@@ -856,6 +846,8 @@ pub struct SimpleOccurences<'a> {
 /// from [`Provider::documents_with_word`]. If a document doesn't exist, still [`Self::add_document`],
 /// but with an empty [`String`].
 impl<'a> SimpleOccurences<'a> {
+    /// The [`proximity::ProximateMap`] can be acquired from
+    /// [`crate::query::Documents::take_proximate_map`] which is returned from [`Query::documents`].
     pub fn new(index: &'a Simple, word_proximates: &'a proximity::ProximateMap<'a>) -> Self {
         Self {
             index,
@@ -1003,7 +995,7 @@ impl Default for LosslessDocMap {
 
 /// Index which keeps track of all occurrences of all words.
 ///
-/// Much (10x) faster than [`Simple`], but memory need grows linearly with content added.
+/// Much (10x) faster than [`Simple`], but memory usage grows linearly with content added.
 /// [`Simple`]s memory usage grows only with word count & document count.
 /// If you have relatively short documents, this doesn't take up a lot more memory (only about 2-4x).
 #[derive(Debug, Clone)]
@@ -1159,6 +1151,7 @@ impl<'a> Provider<'a> for Lossless {
         self.proximity_algo
     }
 }
+/// Get occurrences of a word (or similar words) from this [`Lossless`] index.
 #[derive(Debug)]
 #[must_use]
 pub struct LosslessOccurrences<'a> {
@@ -1166,6 +1159,8 @@ pub struct LosslessOccurrences<'a> {
     word_proximates: &'a proximity::ProximateMap<'a>,
 }
 impl<'a> LosslessOccurrences<'a> {
+    /// The [`proximity::ProximateMap`] can be acquired from
+    /// [`crate::query::Documents::take_proximate_map`] which is returned from [`Query::documents`].
     pub fn new(index: &'a Lossless, word_proximates: &'a proximity::ProximateMap<'a>) -> Self {
         Self {
             index,

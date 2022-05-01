@@ -1,7 +1,8 @@
 //! A light-weight (2 total dependencies, including descendants)
-//! embeddable search engine with typo tolerance, result relevance, and complex queries.
+//! embeddable search engine with support for typo tolerance, result relevance, and complex queries,
+//! powered by [iterators](#iterators).
 //!
-//! If you want *page* relevancy (like [PageRank](https://en.wikipedia.org/wiki/PageRank)),
+//! If you want *page relevancy* (like [PageRank](https://en.wikipedia.org/wiki/PageRank)),
 //! you have to implement it on your own.
 //!
 //! Also note that you have to provide this library with data and data updates.
@@ -16,6 +17,10 @@
 //!
 //! Say you want to get the best result, then you can just call [`Iterator::next`] once, and
 //! only one occurrence is processed.
+//!
+//! You may want to read the
+//! [article on writing the first iteration](https://icelk.dev/articles/search-engine.)
+//! of elipdotter.
 #![deny(
     clippy::pedantic,
     unreachable_pub,

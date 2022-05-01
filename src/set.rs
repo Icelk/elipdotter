@@ -1,15 +1,14 @@
 //! Set operations on ordered iterators.
 //! These are the fundamental join operations of the search engine.
 //!
-//! These are provided by [`iter_set`], except [`progressive`], which is written by be.
+//! These are provided by [`iter_set`], except [`progressive`] and [`deduplicate`],
+//! which are written by be.
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::iter::Peekable;
 use std::mem;
 
-/// Convenience trait for `Iterator<Item = T> -> Iter<T>`.
-pub trait Iter<T>: Iterator<Item = T> {}
-impl<T, I: Iterator<Item = T>> Iter<T> for I {}
+use iter_set::Inclusion;
 
 #[derive(Debug)]
 pub struct Deduplicate<T, I, F>
@@ -21,7 +20,7 @@ where
     current: Option<T>,
     chooser: F,
 }
-impl<T, I: Iter<T>, F: Fn(T, T) -> T> Deduplicate<T, I, F> {
+impl<T, I: Iterator<Item = T>, F: Fn(T, T) -> T> Deduplicate<T, I, F> {
     fn new(iter: I, chooser: F) -> Self {
         Self {
             iter: iter.peekable(),
@@ -30,7 +29,7 @@ impl<T, I: Iter<T>, F: Fn(T, T) -> T> Deduplicate<T, I, F> {
         }
     }
 }
-impl<T: PartialEq, I: Iter<T>, F: Fn(T, T) -> T> Iterator for Deduplicate<T, I, F> {
+impl<T: PartialEq, I: Iterator<Item = T>, F: Fn(T, T) -> T> Iterator for Deduplicate<T, I, F> {
     type Item = T;
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -57,7 +56,9 @@ impl<T: PartialEq, I: Iter<T>, F: Fn(T, T) -> T> Iterator for Deduplicate<T, I, 
 ///
 /// This works best for sorted iterators (e.g. [`std::collections::BTreeMap::iter`]) as they
 /// always have any duplicate items right after each other.
-pub fn deduplicate<T: PartialEq, I: Iter<T>>(iter: I) -> Deduplicate<T, I, fn(T, T) -> T> {
+///
+/// All the iterators used within elipdotter are sorted.
+pub fn deduplicate<T: PartialEq, I: Iterator<Item = T>>(iter: I) -> Deduplicate<T, I, fn(T, T) -> T> {
     Deduplicate::new(iter, |a, _| a)
 }
 /// Removes consecutive duplicate items.
@@ -66,7 +67,7 @@ pub fn deduplicate<T: PartialEq, I: Iter<T>>(iter: I) -> Deduplicate<T, I, fn(T,
 ///
 /// This works best for sorted iterators (e.g. [`std::collections::BTreeMap::iter`]) as they
 /// always have any duplicate items right after each other.
-pub fn deduplicate_by_keep_fn<T: PartialEq, I: Iter<T>, F: Fn(T, T) -> T>(
+pub fn deduplicate_by_keep_fn<T: PartialEq, I: Iterator<Item = T>, F: Fn(T, T) -> T>(
     iter: I,
     chooser: F,
 ) -> Deduplicate<T, I, F> {
@@ -108,13 +109,6 @@ where
     R: IntoIterator<Item = T>,
 {
     iter_set::difference(deduplicate(a.into_iter()), deduplicate(b.into_iter()))
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProgressiveInclusion<T> {
-    Left(T),
-    Both(T, T),
-    Right(T),
 }
 
 struct Progressive<
@@ -159,13 +153,13 @@ impl<
         M: FnMut(&T, &T) -> core::cmp::Ordering,
     > Iterator for Progressive<T, L, R, C, M>
 {
-    type Item = ProgressiveInclusion<T>;
+    type Item = Inclusion<T>;
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match (self.l_next.take(), self.r_next.take()) {
                 (Some(l), Some(r)) => match (self.matches)(&l, &r) {
                     Ordering::Less => {
-                        let l = ProgressiveInclusion::Left(l);
+                        let l = Inclusion::Left(l);
                         self.r_next = Some(r);
                         self.next_l();
                         return Some(l);
@@ -175,7 +169,7 @@ impl<
                         self.r_next = Some(r);
                     }
                     Ordering::Greater => {
-                        let r = ProgressiveInclusion::Right(r);
+                        let r = Inclusion::Right(r);
                         self.l_next = Some(l);
                         self.next_r();
                         return Some(r);
@@ -185,12 +179,12 @@ impl<
             }
 
             if self.r_peek.is_none() {
-                let ret = ProgressiveInclusion::Both(self.l_next.take()?, self.r_next.clone()?);
+                let ret = Inclusion::Both(self.l_next.take()?, self.r_next.clone()?);
                 self.next_l();
                 return Some(ret);
             }
             if self.l_peek.is_none() {
-                let ret = ProgressiveInclusion::Both(self.l_next.clone()?, self.r_next.take()?);
+                let ret = Inclusion::Both(self.l_next.clone()?, self.r_next.take()?);
                 self.next_r();
                 return Some(ret);
             }
@@ -221,12 +215,12 @@ impl<
                     }
                     // Now the NOT (right) is as close as possible. Even if it's behind, take the
                     // next AND (left) and check it. Else, the current NOT will not be checked against.
-                    let ret = ProgressiveInclusion::Both(left.clone(), right.clone());
+                    let ret = Inclusion::Both(left.clone(), right.clone());
                     self.next_l();
                     return Some(ret);
                 }
             }
-            let ret = ProgressiveInclusion::Both(left.clone(), right.clone());
+            let ret = Inclusion::Both(left.clone(), right.clone());
             if advance_right {
                 self.next_r();
             } else {
@@ -250,7 +244,7 @@ pub fn progressive<T, L, R, C, M>(
     comparison: C,
     matches: M,
     minimize_dist_right: Option<fn(&T, &T) -> usize>,
-) -> impl Iterator<Item = ProgressiveInclusion<T>>
+) -> impl Iterator<Item = Inclusion<T>>
 where
     T: Clone,
     L: IntoIterator<Item = T>,
