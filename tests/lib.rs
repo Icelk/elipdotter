@@ -102,8 +102,9 @@ fn query_and_not_2() {
     let next = occurences.next().unwrap();
     assert_eq!(next.id(), map.get_id("doc 1").unwrap());
     assert_eq!(next.start(), 399);
-    assert!(next.rating() <= 1.0);
-    assert!(next.rating() >= -1.0);
+    // since this wasn't caught by the NOT (it wasn't present in the entire document),
+    // elipdotter adds 2.5 to the rating.
+    assert_eq!(next.rating(), 2.5);
     let next = occurences.next().unwrap();
     assert_eq!(next.id(), map.get_id("doc_2").unwrap());
     assert_eq!(next.start(), 348);
@@ -133,8 +134,9 @@ fn query_and_not_3() {
     let next = occurences.next().unwrap();
     assert_eq!(next.id(), map.get_id("doc 1").unwrap());
     assert_eq!(next.start(), 399);
-    assert!(next.rating() <= 1.0);
-    assert!(next.rating() >= -1.0);
+    // since this wasn't caught by the NOT (it wasn't present in the entire document),
+    // elipdotter adds 2.5 to the rating.
+    assert_eq!(next.rating(), 2.5, "rating is {}", next.rating());
     let next = occurences.next().unwrap();
     assert_eq!(next.id(), map.get_id("doc_2").unwrap());
     assert_eq!(next.start(), 348);
