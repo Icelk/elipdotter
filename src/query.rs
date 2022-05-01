@@ -529,36 +529,41 @@ impl Query {
             .map(|iter| {
                 iter.map(|occ| {
                     let mut occ = occ.0;
+
+                    let mut increase = 0.;
+                    // We keep track of the closest to determine which index should be the `major`
+                    // one.
                     let (mut closest, mut closest_index) = (usize::MAX, 0);
+
                     let mut iter = occ.occurrences();
                     let mut last = iter
                         .next()
                         .unwrap_or_else(|| AssociatedOccurrence::new(0, 0));
-                    for (idx, occ) in iter.enumerate() {
-                        if last.word_id() != occ.word_id() {
-                            let dist = occ.start() - last.start();
+
+                    for (idx, associated_occ) in iter.enumerate() {
+                        if last.word_id() != associated_occ.word_id() {
+                            let dist = associated_occ.start() - last.start();
                             if dist < closest {
-                                closest_index = idx + 1;
+                                closest_index = idx;
                             }
                             closest = std::cmp::min(dist, closest);
+                            // Don't really care about precision.
+                            #[allow(clippy::cast_precision_loss)]
+                            let rating_increase = 0.5 / (0.001 * dist as f32 + 0.1);
+                            increase += rating_increase;
                         }
-                        last = occ;
+                        last = associated_occ;
                     }
-                    if closest < usize::MAX {
-                        // Don't really care about precision.
-                        #[allow(clippy::cast_precision_loss)]
-                        let rating_increase = 1.0 / (0.001 * closest as f32 + 0.1);
-                        *occ.rating_mut() += rating_increase;
+                    *occ.rating_mut() += increase;
 
-                        // replace `occurrence.start()` with the closest match.
-                        // This requires removing the closest from the set and setting as "main"
-                        // and inserting "main" to the set.
-                        if closest_index != 0 {
-                            let closest = occ.occurrences().nth(closest_index - 1).unwrap();
-                            occ.occurrences.remove(&closest);
-                            occ.occurrences.insert((&occ.occurrence).into());
-                            *occ.occurrence.start_mut() = closest.start();
-                        }
+                    // replace `occurrence.start()` with the closest match.
+                    // This requires removing the closest from the set and setting as "main"
+                    // and inserting "main" to the set.
+                    if closest_index != 0 {
+                        let closest = occ.occurrences().nth(closest_index).unwrap();
+                        occ.occurrences.remove(&closest);
+                        occ.occurrences.insert((&occ.occurrence).into());
+                        *occ.occurrence.start_mut() = closest.start();
                     }
 
                     occ
