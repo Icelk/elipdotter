@@ -234,7 +234,7 @@ pub struct ProximateDocItem<'a> {
 }
 impl<'a> PartialEq for ProximateDocItem<'a> {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+        self.id == other.id && self.word == other.word
     }
 }
 impl<'a> Eq for ProximateDocItem<'a> {}
@@ -245,7 +245,12 @@ impl<'a> PartialOrd for ProximateDocItem<'a> {
 }
 impl<'a> Ord for ProximateDocItem<'a> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.id.cmp(&other.id)
+        let cmp = self.id.cmp(&other.id);
+        if cmp.is_eq() {
+            self.word.cmp(other.word)
+        } else {
+            cmp
+        }
     }
 }
 impl<'a> ProximateDocItem<'a> {
