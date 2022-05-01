@@ -462,14 +462,23 @@ impl Query {
                             Some(abs_diff_occurrence),
                         )
                         .filter_map(|inclusion| match inclusion {
-                            ProgressiveInclusion::Left(and) => Some(and),
+                            ProgressiveInclusion::Left(mut and) => {
+                                *and.0.rating_mut() += 2.5;
+                                Some(and)
+                            }
                             ProgressiveInclusion::Right(_not) => None,
                             ProgressiveInclusion::Both(mut and, not) => {
+                                let not_rating = not.0.rating();
                                 let closest = and.closest(&OccurenceEq::new(not.0.occurrence, 0));
                                 // Don't really care about precision.
                                 #[allow(clippy::cast_precision_loss)]
                                 let rating_decrease = 1.0 / (0.0001 * closest.0 as f32 + 0.025);
                                 *and.0.rating_mut() -= rating_decrease;
+                                // by decreasing the rating based on the not rating too, we remove
+                                // extra when there are multiple NOTs.
+                                // `TODO` apply the same filter as we do below for acceted ones for
+                                // the NOT occurrences, so groups are better recognized.
+                                *and.0.rating_mut() -= not_rating;
                                 and.0.closest_not = Some(closest.1);
                                 Some(and)
                             }
