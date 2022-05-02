@@ -28,7 +28,7 @@
     // missing_docs
 )]
 #![allow(clippy::doc_markdown)]
-// #![doc(html_root_url = "https://doc.icelk.dev/elipdotter/elipdotter/")]
+#![doc(html_root_url = "https://doc.icelk.dev/elipdotter/elipdotter/")]
 
 pub mod index;
 pub mod proximity;
