@@ -24,6 +24,10 @@ contain minimal examples.
 
 # Changelog
 
+## v0.3.1
+
+-   Removed unwanted debugging.
+
 ## v0.3.0
 
 -   Added lossless index for faster query resolution times.

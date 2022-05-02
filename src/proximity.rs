@@ -282,14 +282,12 @@ impl<'a, P: Provider<'a>> Iterator for ProximateDocIter<'a, P> {
         loop {
             if let Some((word, doc_iter, proximity)) = &mut self.current {
                 if let Some(doc) = doc_iter.next() {
-                    println!("Next in iter over {word} in {doc:?} with proximity {proximity}");
                     return Some(ProximateDocItem::new((doc, word, *proximity)));
                 }
                 self.current = None;
                 continue;
             }
             if let Some((next_word, proximity)) = self.word_iter.next() {
-                println!("Check word {next_word} with proximity {proximity}");
                 self.current = self
                     .provider
                     .documents_with_word(&**next_word)
