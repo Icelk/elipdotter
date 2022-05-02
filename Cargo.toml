@@ -1,7 +1,7 @@
 [package]
 name = "elipdotter"
 # Also remember to comment out #![doc] line in src/lib.rs
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Icelk <main@icelk.dev>"]
 edition = "2021"
 rust-version = "1.56"
