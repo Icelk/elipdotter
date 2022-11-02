@@ -1002,7 +1002,7 @@ pub mod parse {
         ///
         /// [`Self::populate_and_space`] should definitely be last.
         ///
-        /// See [`literal_rule!`] for an example.
+        /// See [`crate::literal_rule!`] for an example.
         pub fn new() -> Self {
             Self { rules: Vec::new() }
         }
@@ -1078,7 +1078,7 @@ pub mod parse {
     ///
     /// # Examples
     ///
-    /// See [`literal_rule!`] and [`not_prefix!`].
+    /// See [`crate::literal_rule!`] and [`crate::not_prefix!`].
     ///
     /// ```
     /// use elipdotter::*;
