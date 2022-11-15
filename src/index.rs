@@ -229,7 +229,7 @@ impl StrPtr {
         // SAFETY: Since we have the ownership and used `ManuallyDrop`,
         // the memory will never drop.
         // We have to drop it, and it's valid until we do so.
-        unsafe { Self::new(&*s, true) }
+        unsafe { Self::new(&s, true) }
     }
     #[allow(clippy::inline_always)]
     #[inline(always)]
