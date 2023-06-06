@@ -156,7 +156,7 @@ impl<'a, 'b, P: Provider<'a>> Iterator for ProximateWordIter<'a, 'b, P> {
 
                 if similarity > self.threshold {
                     #[allow(clippy::cast_possible_truncation)]
-                    return Some(ProximateWordItem::new((other_word, similarity as f32)));
+                    return Some(ProximateWordItem::new((other_word, similarity)));
                 }
             }
         } else {

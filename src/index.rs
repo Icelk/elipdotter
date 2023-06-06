@@ -1115,9 +1115,8 @@ impl<'a> Provider<'a> for Lossless {
                 (word.0.as_ref().len() + 16)
                     + (docs
                         .docs
-                        .iter()
-                        // 8 for ID, 16 for vec size
-                        .map(|(_id, occs)| 8 + occs.occurrences.len() * 8 + 16)
+                        .values()
+                        .map(|occs| 8 + occs.occurrences.len() * 8 + 16)
                         .sum::<usize>()
                         + 16)
             })
