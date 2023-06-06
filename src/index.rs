@@ -1240,6 +1240,10 @@ impl<'a> OccurenceProvider<'a> for LosslessOccurrences<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use crate::query;
+
     use super::{
         Alphanumeral, DocumentMap, Id, Lossless, LosslessOccurrences, Occurence, OccurenceProvider,
         Provider, Simple, SimpleOccurences,
@@ -1333,5 +1337,29 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
             Some(Occurence::new(0, doc_map.get_id("doc3").unwrap(), 0))
         );
         assert_eq!(occurrences.next(), None);
+    }
+    #[test]
+    fn occurences_lossless_and_not() {
+        let mut doc_map = DocumentMap::new();
+        let mut index = Lossless::new(1.0, crate::proximity::Algorithm::Exact, 100);
+        doc_map.insert("doc1", "organization stop", &mut index);
+        doc_map.insert("doc3", "organization hello", &mut index);
+
+        let query = query::Query::from_str("organization -stop").unwrap();
+
+        let mut docs = query.documents(&index);
+        let docs_v: Vec<_> = docs.iter().unwrap().collect();
+        let map = docs.take_proximate_map();
+        let occs = LosslessOccurrences::new(&index, &map);
+        let mut occs: Vec<_> = query.occurrences(&occs, 1000).unwrap().collect();
+
+        occs.sort_unstable_by(|a, b| b.rating().total_cmp(&a.rating()));
+
+        assert_eq!(docs_v.len(), 2);
+
+        assert_eq!(occs.len(), 2);
+        assert_eq!(occs[0].id(), doc_map.get_id("doc3").unwrap());
+        assert_eq!(occs[1].id(), doc_map.get_id("doc1").unwrap());
+        assert!(occs[0].rating() > occs[1].rating());
     }
 }

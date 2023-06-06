@@ -460,8 +460,7 @@ impl Query {
                             not,
                             #[inline]
                             |and, not| and.0.start().cmp(&not.0.start()),
-                            #[inline]
-                            |a, b| (*a).cmp(b),
+                            std::cmp::Ord::cmp,
                             Some(abs_diff_occurrence),
                         )
                         .filter_map(|inclusion| match inclusion {

@@ -177,7 +177,9 @@ impl<
                         return Some(r);
                     }
                 },
-                _ => return None,
+                (Some(l), None) => return Some(Inclusion::Left(l)),
+                (None, Some(r)) => return Some(Inclusion::Right(r)),
+                (None, None) => return None,
             }
 
             if self.r_peek.is_none() {
