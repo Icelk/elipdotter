@@ -177,8 +177,16 @@ impl<
                         return Some(r);
                     }
                 },
-                (Some(l), None) => return Some(Inclusion::Left(l)),
-                (None, Some(r)) => return Some(Inclusion::Right(r)),
+                (Some(l), None) => {
+                    let l = Inclusion::Left(l);
+                    self.next_l();
+                    return Some(l);
+                }
+                (None, Some(r)) => {
+                    let r = Inclusion::Right(r);
+                    self.next_r();
+                    return Some(r);
+                }
                 (None, None) => return None,
             }
 

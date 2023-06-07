@@ -1338,7 +1338,7 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
         assert_eq!(occurrences.next(), None);
     }
     #[test]
-    fn occurences_lossless_and_not() {
+    fn occurences_lossless_and_not_1() {
         let mut doc_map = DocumentMap::new();
         let mut index = Lossless::new(1.0, crate::proximity::Algorithm::Exact, 100);
         doc_map.insert("doc1", "organization stop", &mut index);
@@ -1360,5 +1360,43 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
         assert_eq!(occs[0].id(), doc_map.get_id("doc3").unwrap());
         assert_eq!(occs[1].id(), doc_map.get_id("doc1").unwrap());
         assert!(occs[0].rating() > occs[1].rating());
+    }
+    #[test]
+    fn occurences_lossless_and_not_2() {
+        let mut doc_map = DocumentMap::new();
+        let mut index = Lossless::new(0.9, crate::proximity::Algorithm::Jaro, 100);
+        doc_map.insert("doc1", "Stop breathing - save the planet
+Som vår kära SD-politker påpekade, människor andas ut co2! Genom att begå massmord kan vi rädda planeten. Dessutom kommer människor inte kunna förstöra klimatet om vi inte existerar!
+SB for the planet's futute!", &mut index);
+        doc_map.insert("doc2", "Sydkusten Marathon
+Vi springer. Ganska klimatsmart 🏆", &mut index);
+        doc_map.insert("doc3", "Mathilda
+Mathildas egna grupp", &mut index);
+        doc_map.insert("doc4", "PSKG
+hejsan hejsan", &mut index);
+        doc_map.insert("doc5", "Klimatvampyrerna
+Vi vill ha erat blooooooood", &mut index);
+
+        let query = query::Query::from_str("vi -planet").unwrap();
+
+        println!("{query:?}");
+
+        let mut docs = query.documents(&index);
+        let docs_v: Vec<_> = docs.iter().unwrap().collect();
+        let map = docs.take_proximate_map();
+        let occs = LosslessOccurrences::new(&index, &map);
+        let mut occs: Vec<_> = query.occurrences(&occs, 100_000).unwrap().collect();
+
+        occs.sort_unstable_by(|a, b| b.rating().total_cmp(&a.rating()));
+        println!("{occs:#?}");
+
+        assert_eq!(docs_v.len(), 3);
+
+        assert_eq!(occs.len(), 3);
+        assert_eq!(occs[0].id(), doc_map.get_id("doc2").unwrap());
+        assert_eq!(occs[1].id(), doc_map.get_id("doc5").unwrap());
+        assert_eq!(occs[2].id(), doc_map.get_id("doc1").unwrap());
+        assert!(occs[2].rating() < -5.);
+        assert!(occs[0].rating() >= occs[1].rating());
     }
 }
