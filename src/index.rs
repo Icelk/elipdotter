@@ -1368,14 +1368,30 @@ Aliquam euismod, justo eu viverra ornare, ex nisi interdum neque, in rutrum nunc
         doc_map.insert("doc1", "Stop breathing - save the planet
 Som vår kära SD-politker påpekade, människor andas ut co2! Genom att begå massmord kan vi rädda planeten. Dessutom kommer människor inte kunna förstöra klimatet om vi inte existerar!
 SB for the planet's futute!", &mut index);
-        doc_map.insert("doc2", "Sydkusten Marathon
-Vi springer. Ganska klimatsmart 🏆", &mut index);
-        doc_map.insert("doc3", "Mathilda
-Mathildas egna grupp", &mut index);
-        doc_map.insert("doc4", "PSKG
-hejsan hejsan", &mut index);
-        doc_map.insert("doc5", "Klimatvampyrerna
-Vi vill ha erat blooooooood", &mut index);
+        doc_map.insert(
+            "doc2",
+            "Sydkusten Marathon
+Vi springer. Ganska klimatsmart 🏆",
+            &mut index,
+        );
+        doc_map.insert(
+            "doc3",
+            "Mathilda
+Mathildas egna grupp",
+            &mut index,
+        );
+        doc_map.insert(
+            "doc4",
+            "PSKG
+hejsan hejsan",
+            &mut index,
+        );
+        doc_map.insert(
+            "doc5",
+            "Klimatvampyrerna
+Vi vill ha erat blooooooood",
+            &mut index,
+        );
 
         let query = query::Query::from_str("vi -planet").unwrap();
 
