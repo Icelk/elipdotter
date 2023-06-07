@@ -24,6 +24,10 @@ contain minimal examples.
 
 # Changelog
 
+## v0.3.3
+
+-   Fix another issue with AND NOT, where some results would disappear when adding the NOT part.
+
 ## v0.3.2
 
 -   Fix an issue with AND NOT, where some results would disappear when adding the NOT part.
