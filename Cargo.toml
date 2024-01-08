@@ -14,4 +14,4 @@ categories = ["algorithms", "data-structures"]
 
 [dependencies]
 iter-set = "2.0.2"
-strsim = "0.10"
+strsim = "0.11"
