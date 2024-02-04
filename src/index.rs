@@ -982,9 +982,7 @@ impl LosslessDocMap {
     }
 
     fn doc(&mut self, document: Id) -> &mut LosslessDocOccurrences {
-        self.docs
-            .entry(document)
-            .or_default()
+        self.docs.entry(document).or_default()
     }
 }
 impl Default for LosslessDocMap {
