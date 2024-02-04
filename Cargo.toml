@@ -1,7 +1,7 @@
 [package]
 name = "elipdotter"
 # Also remember to comment out #![doc] line in src/lib.rs
-version = "0.3.3"
+version = "0.3.4"
 authors = ["Icelk <main@icelk.dev>"]
 edition = "2021"
 rust-version = "1.56"
@@ -14,4 +14,4 @@ categories = ["algorithms", "data-structures"]
 
 [dependencies]
 iter-set = "2.0.2"
-strsim = "0.10"
+strsim = "0.11"
