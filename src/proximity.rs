@@ -83,7 +83,7 @@ impl<'a> ProximateMap<'a> {
             map: BTreeMap::new(),
         }
     }
-    pub(crate) fn get_panic(&'a self, word: &str) -> &'a ProximateList {
+    pub(crate) fn get_or_panic(&'a self, word: &str) -> &'a ProximateList {
         fn panic_missing_proximate_words(word: &str) -> ! {
             panic!("Missing proximate words when iterating over occurrences of word {}. Check you are passing the correct `proximity::ProximateMap`.", word)
         }
@@ -167,7 +167,7 @@ impl<'a, 'b, P: Provider<'a>> Iterator for ProximateWordIter<'a, 'b, P> {
                 if let Some(len_diff) = len_diff {
                     if other_word
                         .chars()
-                        .take(self.word.len())
+                        .take(self.word.chars().count())
                         .eq(self.word.chars())
                     {
                         if len_diff == 0 {

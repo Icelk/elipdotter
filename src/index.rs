@@ -10,6 +10,7 @@
 //!
 //! The [`DocumentMap`] makes it performant to get the document ID from name and vice versa.
 
+use std::any::Any;
 use std::cmp;
 use std::collections::{btree_map, btree_set, BTreeMap, BTreeSet, HashMap};
 use std::fmt::{Debug, Display};
@@ -127,13 +128,25 @@ impl AssociatedOccurrence {
 ///
 /// Can with benefits be used with [`StrPtr`].
 #[derive(Clone, Hash)]
-#[repr(transparent)]
-pub struct Alphanumeral<T: ?Sized>(T);
+pub struct Alphanumeral<T: ?Sized> {
+    // used for ranges in btreemaps.
+    include_other: bool,
+    s: T,
+}
 impl<T> Alphanumeral<T> {
     #[allow(clippy::inline_always)]
     #[inline(always)]
     pub fn new(s: T) -> Self {
-        Self(s)
+        Self {
+            include_other: false,
+            s,
+        }
+    }
+    fn whole(s: T) -> Self {
+        Self {
+            include_other: true,
+            s,
+        }
     }
     #[allow(clippy::inline_always)]
     #[inline(always)]
@@ -141,7 +154,7 @@ impl<T> Alphanumeral<T> {
     where
         T: ToOwned + AsRef<str>,
     {
-        Alphanumeral::new(self.0.to_owned())
+        Alphanumeral::new(self.s.to_owned())
     }
 }
 impl<T: AsRef<str>> From<T> for Alphanumeral<T> {
@@ -153,32 +166,40 @@ impl<T: AsRef<str>> Alphanumeral<T> {
     #[allow(clippy::inline_always)]
     #[inline(always)]
     pub fn chars(&self) -> impl Iterator<Item = char> + Clone + '_ {
-        self.0
+        self.s
             .as_ref()
             .chars()
-            .filter(|c: &char| c.is_alphanumeric())
+            .filter(|c: &char| c.is_alphanumeric() || self.include_other)
             .flat_map(char::to_lowercase)
     }
 }
 impl<T: AsRef<str>> AsRef<str> for Alphanumeral<T> {
     fn as_ref(&self) -> &str {
-        self.0.as_ref()
+        self.s.as_ref()
     }
 }
-impl<T1: AsRef<str>, T2: AsRef<str>> PartialEq<T1> for Alphanumeral<T2> {
-    fn eq(&self, other: &T1) -> bool {
-        self.chars().eq(Alphanumeral::new(other).chars())
+impl<T1: AsRef<str>, T2: AsRef<str>> PartialEq<Alphanumeral<T1>> for Alphanumeral<T2> {
+    fn eq(&self, other: &Alphanumeral<T1>) -> bool {
+        self.chars().eq(other.chars())
     }
 }
-impl<T: AsRef<str>> Eq for Alphanumeral<T> {}
-impl<T: AsRef<str>> PartialOrd for Alphanumeral<T> {
+// impl<T1: AsRef<str> + Any, T2: AsRef<str> + Any> PartialEq<T1> for Alphanumeral<T2> {
+//     fn eq(&self, other: &T1) -> bool {
+//         if let Some(a) = (other as &dyn Any).downcast_ref::<Alphanumeral<T2>>() {
+//             return self.chars().eq(a.chars());
+//         }
+//         self.chars().eq(Alphanumeral::new(other).chars())
+//     }
+// }
+impl<T: AsRef<str> + Any> Eq for Alphanumeral<T> {}
+impl<T: AsRef<str> + Any> PartialOrd for Alphanumeral<T> {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
-impl<T: AsRef<str>> Ord for Alphanumeral<T> {
+impl<T: AsRef<str> + Any> Ord for Alphanumeral<T> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.chars().cmp(Alphanumeral::new(other).chars())
+        self.chars().cmp(other.chars())
     }
 }
 impl<T: AsRef<str>> Debug for Alphanumeral<T> {
@@ -194,6 +215,7 @@ impl<T: AsRef<str>> Display for Alphanumeral<T> {
 
 /// Needed to index a [custom struct](Alphanumeral) in maps.
 /// We have to have the same type, so this acts as both the borrowed and owned.
+/// `TODO`: `Cow`? But lifetime is a nightmare?
 pub struct StrPtr {
     s: *const str,
     /// drop if it's owned
@@ -264,11 +286,9 @@ impl Display for StrPtr {
         std::fmt::Display::fmt(&self.as_ref(), f)
     }
 }
-impl ToOwned for StrPtr {
-    type Owned = Self;
-    fn to_owned(&self) -> Self::Owned {
-        let s = self.as_ref().to_owned();
-        Self::owned(s)
+impl Clone for StrPtr {
+    fn clone(&self) -> Self {
+        Self::owned(self.as_ref())
     }
 }
 unsafe impl Send for StrPtr {}
@@ -450,7 +470,7 @@ pub trait Provider<'a> {
             }
             // Word must be alphanumeric to be added.
             // Words with hyphens are also accepted.
-            if word.contains(|c: char| !c.is_alphanumeric() && c != '-') {
+            if word.contains(|c: char| !c.is_alphanumeric() && !matches!(c, '-' | '—' | '–')) {
                 continue;
             }
 
@@ -517,9 +537,9 @@ impl<'a> SplitNonAlphanumeric<'a> {
 impl<'a> Iterator for SplitNonAlphanumeric<'a> {
     type Item = SplitItem<'a>;
     fn next(&mut self) -> Option<Self::Item> {
-        let mut iter = self.s[self.start..].char_indices();
+        let iter = self.s[self.start..].char_indices();
         // Not for because we need `iter.next()` below.
-        while let Some((pos, c)) = iter.next() {
+        for (pos, c) in iter {
             if !c.is_alphanumeric() {
                 if self.hyphen_second_word {
                     let hyphen_word = &self.s[self.hyphen_start..self.start + pos];
@@ -531,21 +551,19 @@ impl<'a> Iterator for SplitNonAlphanumeric<'a> {
                         index: self.hyphen_start,
                     });
                 }
-                if c == '-' {
+                if matches!(c, '-' | '—' | '–') {
                     self.hyphen_start = self.start;
                     self.hyphen_second_word = true;
                 }
                 let old_start = self.start;
-                self.start = self
-                    .start
-                    .saturating_add(iter.next().map_or(c.len_utf8(), |(pos, _)| pos));
+                self.start = self.start.saturating_add(pos + c.len_utf8());
                 return Some(SplitItem::Word {
                     index: old_start,
                     word: self.s.get(old_start..old_start + pos).unwrap(),
                 });
             }
         }
-        let s = self.s.get(self.start..).unwrap();
+        let s = &self.s[self.start..];
         if !s.is_empty() {
             self.start += s.len();
             return Some(SplitItem::Word {
@@ -719,7 +737,7 @@ impl<'a> Provider<'a> for Simple {
         self.words
             .iter()
             // +16 for Arc size and btree size
-            .map(|(word, docs)| word.0.as_ref().len() + 16 + docs.docs.len() * 8 + 16)
+            .map(|(word, docs)| word.s.as_ref().len() + 16 + docs.docs.len() * 8 + 16)
             .sum()
     }
 
@@ -895,7 +913,7 @@ impl<'a> OccurenceProvider<'a> for SimpleOccurences<'a> {
                 &self.missing,
             ))
         } else {
-            let words = self.word_proximates.get_panic(word);
+            let words = self.word_proximates.get_or_panic(word);
 
             Some(SimpleOccurrencesIter::new(
                 Box::new(
@@ -1110,7 +1128,7 @@ impl<'a> Provider<'a> for Lossless {
             .iter()
             .map(|(word, docs)| {
                 // +16 for Arc size and btree map
-                (word.0.as_ref().len() + 16)
+                (word.s.as_ref().len() + 16)
                     + (docs
                         .docs
                         .values()
@@ -1135,9 +1153,11 @@ impl<'a> Provider<'a> for Lossless {
         let ptr1 = StrPtr::owned(s1);
         let s2 = String::from(next_char(c));
         let ptr2 = StrPtr::owned(s2);
+        let a1 = Alphanumeral::whole(ptr1);
+        let a2 = Alphanumeral::whole(ptr2);
 
         self.words
-            .range(Alphanumeral::new(ptr1)..Alphanumeral::new(ptr2))
+            .range(a1..a2)
             .map::<&Arc<AlphanumRef>, _>(|(k, _v)| k)
     }
 
@@ -1220,7 +1240,7 @@ impl<'a> OccurenceProvider<'a> for LosslessOccurrences<'a> {
                     .map(|(id, occs)| (&occs.occurrences, *id, 1.0)),
             )))
         } else {
-            let words = self.word_proximates.get_panic(word);
+            let words = self.word_proximates.get_or_panic(word);
 
             Some(LosslessOccurrencesIter::new(Box::new(
                 crate::proximity::proximate_word_docs(self.index, words)

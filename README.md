@@ -26,6 +26,12 @@ contain minimal examples.
 
 # Changelog
 
+## v0.3.5
+
+-   Fix panic in some circumstances when non-ASCII characters were indexed.
+-   Fix "starts with" detection when content contains non-alphanumeric or
+    non-ASCII characters.
+
 ## v0.3.4
 
 -   Update `simstr`

@@ -224,7 +224,7 @@ impl<'a, 'b, P: Provider<'a>> Documents<'a, 'b, P> {
                 Part::fn_to_box(|s| self.provider.documents_with_word(s).map(Part::iter_to_box))
             } else {
                 Part::fn_to_box(|s| {
-                    let list = self.proximate_map.get_panic(s);
+                    let list = self.proximate_map.get_or_panic(s);
                     Some(Part::iter_to_box(
                         crate::proximity::proximate_word_docs(self.provider, list)
                             .map(|item| item.id)
